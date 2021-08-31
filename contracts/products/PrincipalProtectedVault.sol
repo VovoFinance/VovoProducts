@@ -8,12 +8,12 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-import "./interfaces/curve/Gauge.sol";
-import "./interfaces/curve/Mintr.sol";
-import "./interfaces/curve/Curve.sol";
-import "./interfaces/uniswap/Uni.sol";
-import "./interfaces/gambit/IRouter.sol";
-import "./interfaces/gambit/IVault.sol";
+import "../interfaces/curve/Gauge.sol";
+import "../interfaces/curve/Mintr.sol";
+import "../interfaces/curve/Curve.sol";
+import "../interfaces/uniswap/Uni.sol";
+import "../interfaces/gambit/IRouter.sol";
+import "../interfaces/gambit/IVault.sol";
 
 contract PrincipalProtectedVault is ERC20 {
   using SafeERC20 for IERC20;
