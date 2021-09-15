@@ -21,25 +21,23 @@ contract PrincipalProtectedVault is ERC20 {
   using SafeMath for uint256;
 
   // usdc token address
-  address public constant usdc = address(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+  address public constant usdc = address(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
   // weth token address
-  address public constant weth = address(0x2170Ed0880ac9A755fd29B2688956BD959F933F8);
+  address public constant weth = address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
   // crv token address
-  address public constant crv = address(0xD533a949740bb3306d119CC777fa900bA034cd52);
+  address public constant crv = address(0x11cDb42B0EB46D95f990BeDD4695A6e3fA034978);
   // curve LP token address
-  address public constant _3crv = address(0x6c3F90f043a72FA612cbac8115EE7e52BDe6E490);
+  address public constant _2crv = address(0x7f90122BF0700F9E7e1F688fe926940E8839F353);
   // curve gauge address
-  address public constant gauge = address(0xbFcF63294aD7105dEa65aA58F8AE5BE2D9d0952A);
+  address public constant gauge = address(0xbF7E49483881C76487b0989CD7d9A8239B20CA41);
   // curve 3pool address
-  address public constant _3pool = address(0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7);
-  // crv token minter
-  address public constant mintr = address(0xd061D61a4d941c39E5453435B6345Dc261C2fcE0);
+  address public constant _2pool = address(0x7f90122BF0700F9E7e1F688fe926940E8839F353);
   // gmx router address
-  address public constant router = address(0xD46B23D042E976F8666F554E928e0Dc7478a8E1f);
+  address public constant router = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
   // gmx vault address
-  address public constant vault = address(0xc73A8DcAc88498FD4b4B1b2AaA37b0a2614Ff67B);
+  address public constant vault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
   // sushiswap address
-  address public constant sushiswap = address(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+  address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
 
   uint256 public withdrawalFee = 50;
   uint256 public performanceFee = 2000;
@@ -73,7 +71,7 @@ contract PrincipalProtectedVault is ERC20 {
    * @notice Get the usd value of this vault: the value of lp + the value of usdc
    */
   function balance() public view returns (uint256) {
-    uint256 lpPrice = ICurveFi(_3pool).get_virtual_price();
+    uint256 lpPrice = ICurveFi(_2pool).get_virtual_price();
     uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
     uint256 lpValue = lpPrice.mul(lpAmount);
     return lpValue.add(IERC20(usdc).balanceOf(address(this)));
@@ -115,16 +113,16 @@ contract PrincipalProtectedVault is ERC20 {
   function earn() public {
     uint256 _usdc = IERC20(usdc).balanceOf(address(this));
     if (_usdc > 0) {
-      IERC20(usdc).safeApprove(_3pool, 0);
-      IERC20(usdc).safeApprove(_3pool, _usdc);
-      uint256 v = _usdc.mul(1e30).div(ICurveFi(_3pool).get_virtual_price());
-      ICurveFi(_3pool).add_liquidity([0, _usdc, 0], v.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
+      IERC20(usdc).safeApprove(_2pool, 0);
+      IERC20(usdc).safeApprove(_2pool, _usdc);
+      uint256 v = _usdc.mul(1e30).div(ICurveFi(_2pool).get_virtual_price());
+      ICurveFi(_2pool).add_liquidity([_usdc, 0], v.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
     }
-    uint256 _3crvBalance = IERC20(_3crv).balanceOf(address(this));
-    if (_3crvBalance > 0) {
-      IERC20(_3crv).safeApprove(gauge, 0);
-      IERC20(_3crv).safeApprove(gauge, _3crvBalance);
-      Gauge(gauge).deposit(_3crvBalance);
+    uint256 _2crvBalance = IERC20(_2crv).balanceOf(address(this));
+    if (_2crvBalance > 0) {
+      IERC20(_2crv).safeApprove(gauge, 0);
+      IERC20(_2crv).safeApprove(gauge, _2crvBalance);
+      Gauge(gauge).deposit(_2crvBalance);
     }
   }
 
@@ -180,10 +178,9 @@ contract PrincipalProtectedVault is ERC20 {
    */
   function collectReward() internal returns(uint256 usdcReward) {
     uint256 _before = IERC20(usdc).balanceOf(address(this));
-    Mintr(mintr).mint(gauge);
+    Gauge(gauge).claim_rewards();
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
-
       IERC20(crv).safeApprove(dex, 0);
       IERC20(crv).safeApprove(dex, _crv);
 
@@ -257,7 +254,7 @@ contract PrincipalProtectedVault is ERC20 {
 
     uint256 b = IERC20(usdc).balanceOf(address(this));
     if (b < r) {
-      uint256 lpPrice = ICurveFi(_3pool).get_virtual_price();
+      uint256 lpPrice = ICurveFi(_2pool).get_virtual_price();
       // amount of LP tokens to withdraw
       uint256 _withdraw = (r.sub(b)).div(lpPrice);
       _withdrawSome(_withdraw);
@@ -291,9 +288,9 @@ contract PrincipalProtectedVault is ERC20 {
    * @return amount of usdc that is withdrawn
    */
   function _withdrawSome(uint256 _amount) internal returns (uint256) {
-    uint256 _before = IERC20(_3crv).balanceOf(address(this));
+    uint256 _before = IERC20(_2crv).balanceOf(address(this));
     Gauge(gauge).withdraw(_amount);
-    uint256 _after = IERC20(_3crv).balanceOf(address(this));
+    uint256 _after = IERC20(_2crv).balanceOf(address(this));
     return _withdrawOne(_after.sub(_before));
   }
 
@@ -304,9 +301,9 @@ contract PrincipalProtectedVault is ERC20 {
    */
   function _withdrawOne(uint256 _amnt) internal returns (uint256) {
     uint256 _before = IERC20(usdc).balanceOf(address(this));
-    IERC20(_3crv).safeApprove(_3pool, 0);
-    IERC20(_3crv).safeApprove(_3pool, _amnt);
-    ICurveFi(_3pool).remove_liquidity_one_coin(_amnt, 1, _amnt.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR).div(1e12));
+    IERC20(_2crv).safeApprove(_2pool, 0);
+    IERC20(_2crv).safeApprove(_2pool, _amnt);
+    ICurveFi(_2pool).remove_liquidity_one_coin(_amnt, 1, _amnt.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR).div(1e12));
     uint256 _after = IERC20(usdc).balanceOf(address(this));
     return _after.sub(_before);
   }
