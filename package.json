@@ -26,6 +26,9 @@
     "hardhat": "^2.6.0"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^4.3.1"
+    "@nomiclabs/hardhat-etherscan": "^2.1.6",
+    "@nomiclabs/hardhat-web3": "^2.0.0",
+    "@openzeppelin/contracts": "^4.3.1",
+    "@openzeppelin/hardhat-upgrades": "^1.10.0"
   }
 }
