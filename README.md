@@ -1,2 +1,2 @@
 # VovoProducts
-Kovan testnet for Principal Protected Products: 0xF008087Cd300Dba75C7d5B7beFeB2947f830941A
+Rinkeby testnet for Principal Protected Products: 0x717D43DD63876ad5496b68D8AA03eBa493289f83
