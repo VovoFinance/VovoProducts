@@ -90,14 +90,12 @@ describe("PPV WBTC", function () {
         usdcContract = new ethers.Contract(usdc, usdcABI, signer);
         sushiContract = new ethers.Contract(sushiswap, sushiABI, signer);
         await usdcContract.bridgeMint(owner.address, "10000000000000000000");
-        console.log("usdc balance", (await usdcContract.balanceOf(owner.address)).toString())
         await usdcContract.connect(owner).approve(sushiswap, "1000000000000000000000000000");
         const path = [usdc, weth, wbtc];
         await sushiContract.connect(owner).swapExactTokensForTokens(
             "10000000000000", "0",
             path,
             owner.address, "1695779711");
-        console.log("wbtc balance", (await wbtcContract.balanceOf(owner.address)).toString())
         // await wbtcContract.mint(owner.address, "10000000000");
         lpContract = new ethers.Contract(_2crv, lpABI, signer);
         gaugeContract = new ethers.Contract(gauge, gaugeABI, signer);
@@ -123,8 +121,6 @@ describe("PPV WBTC", function () {
         const virtualPrice = await lpContract.get_virtual_price();
         console.log("virtual price", virtualPrice.toString())
         const expectedDepositedLP = depositAmount.mul("10000000000000000000000000000").div(virtualPrice);
-        console.log("expected lp", expectedDepositedLP.toString());
-        console.log("lp in gauge", (await gaugeContract.balanceOf(ppv.address)).toString())
         assertAlmostEqual(await gaugeContract.balanceOf(ppv.address), expectedDepositedLP);
     }).timeout(500000)
 

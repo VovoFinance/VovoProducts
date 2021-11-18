@@ -17,7 +17,6 @@ import "../interfaces/gmx/IRouter.sol";
 import "../interfaces/gmx/IVault.sol";
 import "../interfaces/uniswap/IUniswapV2Factory.sol";
 import "../interfaces/uniswap/IUniswapV2Pair.sol";
-import "hardhat/console.sol";
 
 /**
  * @title PrincipalProtectedVault
@@ -159,15 +158,10 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
       IERC20(vaultToken).safeApprove(lpToken, 0);
       IERC20(vaultToken).safeApprove(lpToken, tokenBalance);
       uint256 expectedLpAmount = tokenBalance.mul(1e18).div(vaultTokenBase).mul(1e18).div(ICurveFi(lpToken).get_virtual_price());
-      console.log("vaultTokenBase", vaultTokenBase);
-      console.log("virtual price", ICurveFi(lpToken).get_virtual_price());
-      console.log("expectedLpAmount", expectedLpAmount);
-      console.log("tokenBalance", tokenBalance);
       uint256 lpMinted = ICurveFi(lpToken).add_liquidity([tokenBalance, 0], expectedLpAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
       emit LiquidityAdded(tokenBalance, lpMinted);
     }
     uint256 lpBalance = IERC20(lpToken).balanceOf(address(this));
-    console.log("lpBalance", lpBalance);
     if (lpBalance > 0) {
       IERC20(lpToken).safeApprove(gauge, 0);
       IERC20(lpToken).safeApprove(gauge, lpBalance);
@@ -264,9 +258,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     address[] memory _path = new address[](1);
     _path[0] = underlying;
     uint256 _sizeDelta = leverage.mul(amount).mul(getUnderlyingPrice()).mul(1e12).div(underlyingBase);
-    console.log("underlying price", getUnderlyingPrice());
-    console.log("amount", amount);
-    console.log("sizeDelta", _sizeDelta);
     uint256 _price = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
     IERC20(underlying).safeApprove(gmxRouter, 0);
     IERC20(underlying).safeApprove(gmxRouter, amount);
@@ -280,7 +271,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    */
   function closeTrade() private {
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
-    console.log("size", size);
     if (size == 0) {
       return;
     }
@@ -297,7 +287,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
-    console.log("trade profit", _tradeProfit);
     uint256 _fee = 0;
     if (_tradeProfit > 0) {
       _fee = _tradeProfit.mul(performanceFee).div(FEE_DENOMINATOR);
@@ -358,7 +347,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
       _withdrawSome(lpAmount);
       uint256 _after = IERC20(vaultToken).balanceOf(address(this));
       uint256 _diff = _after.sub(b);
-      console.log("_diff", _diff);
       if (_diff < r.sub(b)) {
         r = b.add(_diff);
       }
@@ -387,7 +375,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    */
   function _withdrawSome(uint256 lpAmount) private {
     uint256 _before = IERC20(lpToken).balanceOf(address(this));
-    console.log("withdraw lp from gauge", lpAmount);
     Gauge(gauge).withdraw(lpAmount);
     uint256 _after = IERC20(lpToken).balanceOf(address(this));
     _withdrawOne(_after.sub(_before));
@@ -398,12 +385,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    * @param _amnt is the amount of LP tokens to withdraw
    */
   function _withdrawOne(uint256 _amnt) private {
-    console.log("withdraw lp amount", _amnt);
-    console.log("withdraw min amount", _amnt.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
     IERC20(lpToken).safeApprove(lpToken, 0);
     IERC20(lpToken).safeApprove(lpToken, _amnt);
     uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).div(ICurveFi(lpToken).get_virtual_price());
-    console.log("expected vault token", expectedVaultTokenAmount);
     ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
   }
 
