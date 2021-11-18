@@ -32,6 +32,10 @@ module.exports = {
       url: `https://rinkeby.infura.io/v3/${infuraApiKey}`,
       accounts: [`0x${kovankey}`]
     },
+    arbitrum: {
+      url: `https://arbitrum-mainnet.infura.io/v3/${infuraArbApiKey}`,
+      accounts: [`0x${kovankey}`]
+    }
   },
   etherscan: {
     apiKey:`${etherscanApiKey}`
