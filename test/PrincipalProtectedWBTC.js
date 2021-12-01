@@ -50,6 +50,7 @@ describe("PPV WBTC", function () {
         await ppv.initialize(
             "Vovo WBTC PPV",
             "voBTC",
+            8,
             wbtc, // vaultoken: wbtc
             wbtc, // underlying: wbtc
             lpToken, // lpToken
@@ -65,6 +66,7 @@ describe("PPV WBTC", function () {
         await ppv2.initialize(
             "Vovo WBTC PPV",
             "voBTC",
+            8,
             wbtc, // vaultoken: wbtc
             wbtc, // underlying: wbtc
             lpToken, // lpToken
@@ -133,7 +135,7 @@ describe("PPV WBTC", function () {
         console.log("share price1", (await ppv.getPricePerShare()).toString());
         const tx = await ppv.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
-        expect(await tx).to.emit(ppv, "OpenPosition").withArgs(position[0], true);
+        expect(await tx).to.emit(ppv, "OpenPosition");
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
         await provider.send("evm_increaseTime", [86400*2])
@@ -142,7 +144,7 @@ describe("PPV WBTC", function () {
         // expect(await tx2).to.emit(ppv, "ClosePosition");
         const position2 = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         expect(await tx2).to.emit(ppv, "ClosePosition");
-        expect(await tx2).to.emit(ppv, "OpenPosition").withArgs(position2[0], true);
+        expect(await tx2).to.emit(ppv, "OpenPosition");
         console.log("share price2", (await ppv.getPricePerShare()).toString());
     }).timeout(500000)
 
@@ -207,9 +209,10 @@ describe("PPV WBTC", function () {
     })
 
     it("set slip", async() => {
-        await expect(ppv.connect(admin).setSlip("5000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setSlip("5000");
-        expect((await ppv.slip()).toString()).to.be.equal("5000");
+        await expect(ppv.connect(admin).setSlip("5000", "7000")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setSlip("5000", "7000");
+        expect((await ppv.farmSlip()).toString()).to.be.equal("5000");
+        expect((await ppv.dexSlip()).toString()).to.be.equal("7000");
     })
 
     it("set DepositEnabled", async() => {

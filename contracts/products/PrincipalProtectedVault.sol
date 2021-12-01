@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.6;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import '@openzeppelin/contracts-upgradeable/proxy/Initializable.sol';
@@ -53,8 +53,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   address gauge;
   uint256 public withdrawalFee;
   uint256 public performanceFee;
-  uint256 public slip;
-  uint256 public sizeDelta;
+  uint256 public farmSlip;
+  uint256 public dexSlip;
   uint256 public totalFarmReward; // lifetime farm reward earnings
   uint256 public totalTradeProfit; // lifetime trade profit
   uint256 public cap;
@@ -90,7 +90,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
-  event SlipSet(uint256 slip);
+  event SlipSet(uint256 farmSlip, uint256 dexSlip);
   event DepositEnabled(bool isDepositEnabled);
   event CapSet(uint256 cap);
   event PokeIntervalSet(uint256 pokeInterval);
@@ -102,6 +102,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   function initialize(
     string memory _vaultName,
     string memory _vaultSymbol,
+    uint8 _vaultDecimal,
     address _vaultToken,
     address _underlying,
     address _lpToken,
@@ -114,6 +115,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     uint256 _underlyingBase
   ) public initializer {
     __ERC20_init(_vaultName, _vaultSymbol);
+    _setupDecimals(_vaultDecimal);
     vaultToken = _vaultToken;
     underlying = _underlying;
     lpToken = _lpToken;
@@ -134,13 +136,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     isDepositEnabled = true;
     withdrawalFee = 50;
     performanceFee = 2000;
-    slip = 100;
-    sizeDelta = 0;
+    farmSlip = 100;
+    dexSlip = 100;
   }
 
 
   /**
-   * @notice Get the usd value of this vault: the value of lp + the value of usdc
+   * @notice Get the value of this vault in vaultToken: the value of lp in vaultToken + the amount of vaultToken
    */
   function balance() public view returns (uint256) {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
@@ -158,7 +160,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
       IERC20(vaultToken).safeApprove(lpToken, 0);
       IERC20(vaultToken).safeApprove(lpToken, tokenBalance);
       uint256 expectedLpAmount = tokenBalance.mul(1e18).div(vaultTokenBase).mul(1e18).div(ICurveFi(lpToken).get_virtual_price());
-      uint256 lpMinted = ICurveFi(lpToken).add_liquidity([tokenBalance, 0], expectedLpAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
+      uint256 lpMinted = ICurveFi(lpToken).add_liquidity([tokenBalance, 0], expectedLpAmount.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR));
       emit LiquidityAdded(tokenBalance, lpMinted);
     }
     uint256 lpBalance = IERC20(lpToken).balanceOf(address(this));
@@ -210,9 +212,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     if (Gauge(gauge).balanceOf(address(this)) > 0) {
       tokenReward = collectReward();
     }
-    if (sizeDelta > 0) {
-      closeTrade();
-    }
+    closeTrade();
     if (tokenReward > 0) {
       openTrade(tokenReward);
     }
@@ -226,7 +226,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    */
   function collectReward() private returns(uint256 tokenReward) {
     uint256 _before = IERC20(underlying).balanceOf(address(this));
-    Gauge(gauge).claim_rewards();
+    Gauge(gauge).claim_rewards(address(this));
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
       IERC20(crv).safeApprove(dex, 0);
@@ -242,7 +242,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
         path[1] = weth;
         path[2] = underlying;
       }
-      Uni(dex).swapExactTokensForTokens(_crv, uint256(0), path, address(this), block.timestamp.add(1800));
+      uint256 expectedAmountsOut = Uni(dex).getAmountsOut(_crv, path)[path.length - 1];
+      uint256 actualAmountsOut = Uni(dex).swapExactTokensForTokens(_crv, expectedAmountsOut.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR),
+        path, address(this), block.timestamp.add(1800))[path.length - 1];
     }
     uint256 _after = IERC20(underlying).balanceOf(address(this));
     tokenReward = _after.sub(_before);
@@ -257,13 +259,12 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   function openTrade(uint256 amount) private {
     address[] memory _path = new address[](1);
     _path[0] = underlying;
-    uint256 _sizeDelta = leverage.mul(amount).mul(getUnderlyingPrice()).mul(1e12).div(underlyingBase);
     uint256 _price = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
+    uint256 _sizeDelta = leverage.mul(amount).mul(getUnderlyingPrice()).mul(1e12).div(underlyingBase);
     IERC20(underlying).safeApprove(gmxRouter, 0);
     IERC20(underlying).safeApprove(gmxRouter, amount);
     IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _price);
-    sizeDelta = _sizeDelta;
-    emit OpenPosition(underlying, sizeDelta, isLong);
+    emit OpenPosition(underlying, _sizeDelta, isLong);
   }
 
   /**
@@ -277,13 +278,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
     uint256 price = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     if (underlying == vaultToken) {
-      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, sizeDelta, isLong, address(this), price);
+      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), price);
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
       path[0] = underlying;
       path[1] = vaultToken;
-      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, sizeDelta, isLong, address(this), price, 0);
+      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), price, 0);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
@@ -293,8 +294,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
       IERC20(vaultToken).safeTransfer(rewards, _fee);
       totalTradeProfit = totalTradeProfit.add(_tradeProfit.sub(_fee));
     }
-    emit ClosePosition(underlying, sizeDelta, isLong, _tradeProfit.sub(_fee), _fee);
-    sizeDelta = 0;
+    emit ClosePosition(underlying, size, isLong, _tradeProfit.sub(_fee), _fee);
   }
 
   /**
@@ -388,7 +388,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     IERC20(lpToken).safeApprove(lpToken, 0);
     IERC20(lpToken).safeApprove(lpToken, _amnt);
     uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).div(ICurveFi(lpToken).get_virtual_price());
-    ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
+    ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR));
   }
 
   function getPricePerShare() external view returns (uint256) {
@@ -440,9 +440,10 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     emit RewardsSet(rewards);
   }
 
-  function setSlip(uint256 _slip) public onlyGovernor {
-    slip = _slip;
-    emit SlipSet(slip);
+  function setSlip(uint256 _farmSlip, uint256 _dexSlip) public onlyGovernor {
+    farmSlip = _farmSlip;
+    dexSlip = _dexSlip;
+    emit SlipSet(farmSlip, dexSlip);
   }
 
   function setDepositEnabled(bool _flag) public onlyGovernor {

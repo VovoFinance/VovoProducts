@@ -8,7 +8,7 @@ interface Gauge {
 
     function withdraw(uint256) external;
 
-    function claim_rewards() external;
+    function claim_rewards(address) external;
 
     function rewarded_token() external returns (address);
 
