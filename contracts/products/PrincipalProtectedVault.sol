@@ -53,8 +53,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   address gauge;
   uint256 public withdrawalFee;
   uint256 public performanceFee;
-  uint256 public farmSlip;
-  uint256 public dexSlip;
+  uint256 public slip;
   uint256 public totalFarmReward; // lifetime farm reward earnings
   uint256 public totalTradeProfit; // lifetime trade profit
   uint256 public cap;
@@ -90,7 +89,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
-  event SlipSet(uint256 farmSlip, uint256 dexSlip);
+  event SlipSet(uint256 slip);
   event DepositEnabled(bool isDepositEnabled);
   event CapSet(uint256 cap);
   event PokeIntervalSet(uint256 pokeInterval);
@@ -136,8 +135,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     isDepositEnabled = true;
     withdrawalFee = 50;
     performanceFee = 2000;
-    farmSlip = 100;
-    dexSlip = 100;
+    slip = 100;
   }
 
 
@@ -160,7 +158,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
       IERC20(vaultToken).safeApprove(lpToken, 0);
       IERC20(vaultToken).safeApprove(lpToken, tokenBalance);
       uint256 expectedLpAmount = tokenBalance.mul(1e18).div(vaultTokenBase).mul(1e18).div(ICurveFi(lpToken).get_virtual_price());
-      uint256 lpMinted = ICurveFi(lpToken).add_liquidity([tokenBalance, 0], expectedLpAmount.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR));
+      uint256 lpMinted = ICurveFi(lpToken).add_liquidity([tokenBalance, 0], expectedLpAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
       emit LiquidityAdded(tokenBalance, lpMinted);
     }
     uint256 lpBalance = IERC20(lpToken).balanceOf(address(this));
@@ -242,9 +240,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
         path[1] = weth;
         path[2] = underlying;
       }
-      uint256 expectedAmountsOut = Uni(dex).getAmountsOut(_crv, path)[path.length - 1];
-      uint256 actualAmountsOut = Uni(dex).swapExactTokensForTokens(_crv, expectedAmountsOut.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR),
-        path, address(this), block.timestamp.add(1800))[path.length - 1];
+      Uni(dex).swapExactTokensForTokens(_crv, 0, path, address(this), block.timestamp.add(1800))[path.length - 1];
     }
     uint256 _after = IERC20(underlying).balanceOf(address(this));
     tokenReward = _after.sub(_before);
@@ -388,7 +384,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     IERC20(lpToken).safeApprove(lpToken, 0);
     IERC20(lpToken).safeApprove(lpToken, _amnt);
     uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).div(ICurveFi(lpToken).get_virtual_price());
-    ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(farmSlip)).div(DENOMINATOR));
+    ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
   }
 
   function getPricePerShare() external view returns (uint256) {
@@ -440,10 +436,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     emit RewardsSet(rewards);
   }
 
-  function setSlip(uint256 _farmSlip, uint256 _dexSlip) public onlyGovernor {
-    farmSlip = _farmSlip;
-    dexSlip = _dexSlip;
-    emit SlipSet(farmSlip, dexSlip);
+  function setSlip(uint256 _slip) public onlyGovernor {
+    slip = _slip;
+    emit SlipSet(slip);
   }
 
   function setDepositEnabled(bool _flag) public onlyGovernor {

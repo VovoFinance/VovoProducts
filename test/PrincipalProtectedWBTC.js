@@ -209,10 +209,9 @@ describe("PPV WBTC", function () {
     })
 
     it("set slip", async() => {
-        await expect(ppv.connect(admin).setSlip("5000", "7000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setSlip("5000", "7000");
-        expect((await ppv.farmSlip()).toString()).to.be.equal("5000");
-        expect((await ppv.dexSlip()).toString()).to.be.equal("7000");
+        await expect(ppv.connect(admin).setSlip("5000")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setSlip("5000");
+        expect((await ppv.slip()).toString()).to.be.equal("5000");
     })
 
     it("set DepositEnabled", async() => {
