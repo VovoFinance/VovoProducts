@@ -135,7 +135,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     isDepositEnabled = true;
     withdrawalFee = 50;
     performanceFee = 2000;
-    slip = 100;
+    slip = 50;
   }
 
 
@@ -145,7 +145,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   function balance() public view returns (uint256) {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
     uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
-    uint256 lpValue = lpPrice.mul(lpAmount).div(1e18).mul(vaultTokenBase).div(1e18);
+    uint256 lpValue = lpPrice.mul(lpAmount).mul(vaultTokenBase).div(1e36);
     return lpValue.add(IERC20(vaultToken).balanceOf(address(this)));
   }
 
@@ -194,6 +194,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     } else {
       shares = (amount.mul(totalSupply())).div(_pool);
     }
+    require(shares > 0, "!shares");
     _mint(msg.sender, shares);
     emit Minted(msg.sender, shares);
   }
@@ -256,7 +257,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     address[] memory _path = new address[](1);
     _path[0] = underlying;
     uint256 _price = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
-    uint256 _sizeDelta = leverage.mul(amount).mul(getUnderlyingPrice()).mul(1e12).div(underlyingBase);
+    uint256 _sizeDelta = leverage.mul(amount).mul(_price).div(underlyingBase);
     IERC20(underlying).safeApprove(gmxRouter, 0);
     IERC20(underlying).safeApprove(gmxRouter, amount);
     IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _price);
@@ -383,21 +384,12 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   function _withdrawOne(uint256 _amnt) private {
     IERC20(lpToken).safeApprove(lpToken, 0);
     IERC20(lpToken).safeApprove(lpToken, _amnt);
-    uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).div(ICurveFi(lpToken).get_virtual_price());
+    uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).mul(ICurveFi(lpToken).get_virtual_price()).div(1e36);
     ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
   }
 
   function getPricePerShare() external view returns (uint256) {
     return balance().mul(1e18).div(totalSupply());
-  }
-
-  function getUnderlyingPrice() public view returns (uint256) {
-    address pair = IUniswapV2Factory(dexFactory).getPair(usdc, underlying);
-    (uint112 reserve0, uint112 reserve1,) = IUniswapV2Pair(pair).getReserves();
-    if (usdc > underlying) {
-      (reserve0, reserve1) = (reserve1, reserve0);
-    }
-    return uint256(reserve0).mul(1e18).div(uint256(reserve1)).mul(underlyingBase).div(usdcBase);
   }
 
   function setGovernance(address _governor) external onlyGovernor {
@@ -427,6 +419,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   }
 
   function setIsLong(bool _isLong) external onlyGovernor {
+    closeTrade();
     isLong = _isLong;
     emit isLongSet(isLong);
   }
