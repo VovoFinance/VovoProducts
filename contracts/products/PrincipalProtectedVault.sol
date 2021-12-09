@@ -135,7 +135,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     isDepositEnabled = true;
     withdrawalFee = 50;
     performanceFee = 2000;
-    slip = 50;
+    slip = 30;
   }
 
 
