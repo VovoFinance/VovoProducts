@@ -61,6 +61,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   uint256 public underlyingBase;
   uint256 public lastPokeTime;
   uint256 public pokeInterval;
+  bool isKeeperOnly;
   bool public isDepositEnabled;
   uint256 public leverage;
   bool public isLong;
@@ -90,6 +91,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
   event SlipSet(uint256 slip);
+  event IsKeeperOnlySet(bool isKeeperOnly);
   event DepositEnabled(bool isDepositEnabled);
   event CapSet(uint256 cap);
   event PokeIntervalSet(uint256 pokeInterval);
@@ -132,6 +134,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     dex = sushiswap;
     dexFactory = sushiFactory;
     keepers[msg.sender] = true;
+    isKeeperOnly = true;
     isDepositEnabled = true;
     withdrawalFee = 50;
     performanceFee = 2000;
@@ -153,6 +156,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    * @notice Add liquidity to curve and deposit the LP tokens to gauge
    */
   function earn() public {
+    require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     uint256 tokenBalance = IERC20(vaultToken).balanceOf(address(this));
     if (tokenBalance > 0) {
       IERC20(vaultToken).safeApprove(lpToken, 0);
@@ -205,7 +209,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
              3. Use the reward to open new leverage trade; 4. Deposit the trade profit and new user deposits into Curve to earn reward
    */
   function poke() external {
-    require(keepers[msg.sender] || msg.sender == governor, "!keepers");
+    require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime + pokeInterval < block.timestamp, "!poke time");
     uint256 tokenReward = 0;
     if (Gauge(gauge).balanceOf(address(this)) > 0) {
@@ -362,7 +366,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
    * @param _asset is the token to withdraw
    */
   function withdrawAsset(address _asset) external {
-    require(keepers[msg.sender] || msg.sender == governor, "!keepers");
+    require(msg.sender == governor, "!governor");
+    require(_asset != vaultToken, "!vaultToken");
     IERC20(_asset).safeTransfer(msg.sender, IERC20(_asset).balanceOf(address(this)));
   }
 
@@ -432,6 +437,11 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   function setSlip(uint256 _slip) public onlyGovernor {
     slip = _slip;
     emit SlipSet(slip);
+  }
+
+  function setIsKeeperOnly(bool _isKeeperOnly) public onlyGovernor {
+    isKeeperOnly = _isKeeperOnly;
+    emit IsKeeperOnlySet(_isKeeperOnly);
   }
 
   function setDepositEnabled(bool _flag) public onlyGovernor {
