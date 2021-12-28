@@ -6,9 +6,6 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import '@openzeppelin/contracts-upgradeable/proxy/Initializable.sol';
-import '@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol';
-import '@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol';
 import "../interfaces/IVovoVault.sol";
 import "../interfaces/curve/Gauge.sol";
 import "../interfaces/curve/Curve.sol";
@@ -23,7 +20,7 @@ import "../interfaces/uniswap/IUniswapV2Pair.sol";
  * @dev A vault that receives vaultToken from users, and then deposits the vaultToken into yield farming pools.
  * Periodically, the vault collects the yield rewards and uses the rewards to open a leverage trade on a perpetual swap exchange.
  */
-contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
+contract PrincipalProtectedVault is ERC20 {
   using SafeERC20 for IERC20;
   using Address for address;
   using SafeMath for uint256;
@@ -100,7 +97,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
   event VaultRegistered(address fromVault, address toVault);
   event VaultRevoked(address fromVault, address toVault);
 
-  function initialize(
+  constructor(
     string memory _vaultName,
     string memory _vaultSymbol,
     uint8 _vaultDecimal,
@@ -114,8 +111,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable {
     uint256 _cap,
     uint256 _vaultTokenBase,
     uint256 _underlyingBase
-  ) public initializer {
-    __ERC20_init(_vaultName, _vaultSymbol);
+  ) ERC20(_vaultName, _vaultSymbol) public {
     _setupDecimals(_vaultDecimal);
     vaultToken = _vaultToken;
     underlying = _underlying;

@@ -43,8 +43,7 @@ describe("PPV", function () {
         rewards = addrs[3];
         keeper = addrs[4];
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
-        ppv = await ppvContract.connect(owner).deploy()
-        await ppv.initialize(
+        ppv = await ppvContract.connect(owner).deploy(
             "Vovo USDC PPV",
             "voUSDC",
             6,
@@ -59,8 +58,8 @@ describe("PPV", function () {
             "1000000", // vaultToken base: 1e6
             "1000000000000000000" // underlying base: 1e18
         )
-        ppv2 = await ppvContract.connect(owner).deploy();
-        await ppv2.initialize(
+
+        ppv2 = await ppvContract.connect(owner).deploy(
             "Vovo USDC PPV",
             "voUSDC",
             6,
@@ -75,6 +74,7 @@ describe("PPV", function () {
             6, // vaultToken base
             18 // underlying base
         )
+
         await network.provider.request({
             method: "hardhat_impersonateAccount",
             params: ["0x096760F208390250649E3e8763348E783AEF5562"],

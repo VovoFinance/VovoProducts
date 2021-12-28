@@ -46,8 +46,7 @@ describe("PPV WBTC", function () {
         rewards = addrs[3];
         keeper = addrs[4];
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
-        ppv = await ppvContract.connect(owner).deploy()
-        await ppv.initialize(
+        ppv = await ppvContract.connect(owner).deploy(
             "Vovo WBTC PPV",
             "voBTC",
             8,
@@ -62,8 +61,8 @@ describe("PPV WBTC", function () {
             "100000000", // vaultToken base: 1e8
             "1000000000000000000" // underlying base: 1e8
         )
-        ppv2 = await ppvContract.connect(owner).deploy()
-        await ppv2.initialize(
+
+        ppv2 = await ppvContract.connect(owner).deploy(
             "Vovo WBTC PPV",
             "voBTC",
             8,
@@ -78,6 +77,7 @@ describe("PPV WBTC", function () {
             "100000000", // vaultToken base: 1e8
             "1000000000000000000" // underlying base: 1e8
         )
+
         await network.provider.request({
             method: "hardhat_impersonateAccount",
             params: ["0x096760F208390250649E3e8763348E783AEF5562"],
