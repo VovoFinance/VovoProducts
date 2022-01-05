@@ -51,6 +51,7 @@ contract PrincipalProtectedVault is ERC20 {
   uint256 public withdrawalFee;
   uint256 public performanceFee;
   uint256 public slip;
+  uint256 public maxCollateralMultiplier;
   uint256 public totalFarmReward; // lifetime farm reward earnings
   uint256 public totalTradeProfit; // lifetime trade profit
   uint256 public cap;
@@ -58,6 +59,7 @@ contract PrincipalProtectedVault is ERC20 {
   uint256 public underlyingBase;
   uint256 public lastPokeTime;
   uint256 public pokeInterval;
+  uint256 public currentTokenReward;
   bool isKeeperOnly;
   bool public isDepositEnabled;
   uint256 public leverage;
@@ -88,6 +90,7 @@ contract PrincipalProtectedVault is ERC20 {
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
   event SlipSet(uint256 slip);
+  event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
   event IsKeeperOnlySet(bool isKeeperOnly);
   event DepositEnabled(bool isDepositEnabled);
   event CapSet(uint256 cap);
@@ -135,6 +138,7 @@ contract PrincipalProtectedVault is ERC20 {
     withdrawalFee = 50;
     performanceFee = 2000;
     slip = 30;
+    maxCollateralMultiplier = leverage;
   }
 
 
@@ -145,7 +149,7 @@ contract PrincipalProtectedVault is ERC20 {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
     uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
     uint256 lpValue = lpPrice.mul(lpAmount).mul(vaultTokenBase).div(1e36);
-    return lpValue.add(IERC20(vaultToken).balanceOf(address(this)));
+    return lpValue.add(getActivePositionValue()).add(IERC20(vaultToken).balanceOf(address(this)));
   }
 
   /**
@@ -215,6 +219,7 @@ contract PrincipalProtectedVault is ERC20 {
     if (tokenReward > 0) {
       openTrade(tokenReward);
     }
+    currentTokenReward = tokenReward;
     earn();
     lastPokeTime = block.timestamp;
   }
@@ -393,6 +398,27 @@ contract PrincipalProtectedVault is ERC20 {
     return balance().mul(1e18).div(totalSupply());
   }
 
+  /**
+   * @notice get the active leverage position value in vaultToken
+   */
+  function getActivePositionValue() public view returns (uint256) {
+    (uint256 size, uint256 collateral,,uint256 entryFundingRate,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    if (size == 0) {
+      return 0;
+    }
+    (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), underlying, underlying, isLong);
+    uint256 feeUsd = IVault(gmxVault).getPositionFee(size);
+    uint256 fundingFee = IVault(gmxVault).getFundingFee(underlying, size, entryFundingRate);
+    feeUsd = feeUsd.add(fundingFee);
+    uint256 positionValueUsd = hasProfit ? collateral.add(delta).sub(feeUsd) : collateral.sub(delta).sub(feeUsd);
+    uint256 positionValue = IVault(gmxVault).usdToTokenMin(vaultToken, positionValueUsd);
+    // Cap the positionValue to avoid the oracle manipulation
+    if (positionValue > currentTokenReward.mul(maxCollateralMultiplier)) {
+      positionValue = currentTokenReward.mul(maxCollateralMultiplier);
+    }
+    return positionValue;
+  }
+
   function setGovernance(address _governor) external onlyGovernor {
     governor = _governor;
     emit GovernanceSet(governor);
@@ -415,6 +441,7 @@ contract PrincipalProtectedVault is ERC20 {
   }
 
   function setLeverage(uint256 _leverage) external onlyGovernor {
+    require(_leverage >= 1 && _leverage <= 50, "!leverage");
     leverage = _leverage;
     emit LeverageSet(leverage);
   }
@@ -433,6 +460,12 @@ contract PrincipalProtectedVault is ERC20 {
   function setSlip(uint256 _slip) public onlyGovernor {
     slip = _slip;
     emit SlipSet(slip);
+  }
+
+  function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) public onlyGovernor {
+    require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50, "!maxCollateralMultiplier");
+    maxCollateralMultiplier = _maxCollateralMultiplier;
+    emit MaxCollateralMultiplierSet(maxCollateralMultiplier);
   }
 
   function setIsKeeperOnly(bool _isKeeperOnly) public onlyGovernor {
