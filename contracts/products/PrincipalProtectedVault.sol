@@ -3,6 +3,7 @@ pragma solidity ^0.7.6;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -20,7 +21,7 @@ import "../interfaces/uniswap/IUniswapV2Pair.sol";
  * @dev A vault that receives vaultToken from users, and then deposits the vaultToken into yield farming pools.
  * Periodically, the vault collects the yield rewards and uses the rewards to open a leverage trade on a perpetual swap exchange.
  */
-contract PrincipalProtectedVault is ERC20 {
+contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   using SafeERC20 for IERC20;
   using Address for address;
   using SafeMath for uint256;
@@ -177,7 +178,7 @@ contract PrincipalProtectedVault is ERC20 {
   /**
    * @notice Deposit all the token balance of the sender to this vault
    */
-  function depositAll() external {
+  function depositAll() external nonReentrant {
     deposit(IERC20(vaultToken).balanceOf(msg.sender));
   }
 
@@ -185,7 +186,7 @@ contract PrincipalProtectedVault is ERC20 {
    * @notice Deposit token to this vault. The vault mints shares to the depositor.
    * @param amount is the amount of token deposited
    */
-  function deposit(uint256 amount) public {
+  function deposit(uint256 amount) public nonReentrant {
     uint256 _pool = balance();
     require(isDepositEnabled && _pool.add(amount) < cap, "!deposit");
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
@@ -208,7 +209,7 @@ contract PrincipalProtectedVault is ERC20 {
    * @notice 1. Collect reward from Curve Gauge; 2. Close old leverage trade;
              3. Use the reward to open new leverage trade; 4. Deposit the trade profit and new user deposits into Curve to earn reward
    */
-  function poke() external {
+  function poke() external nonReentrant {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime + pokeInterval < block.timestamp, "!poke time");
     uint256 tokenReward = 0;
@@ -302,7 +303,7 @@ contract PrincipalProtectedVault is ERC20 {
   /**
    * @notice Withdraw all the funds of the sender
    */
-  function withdrawAll() external {
+  function withdrawAll() external nonReentrant {
     uint256 withdrawAmount = _withdraw(balanceOf(msg.sender), true);
     IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
   }
@@ -311,7 +312,7 @@ contract PrincipalProtectedVault is ERC20 {
    * @notice Withdraw the funds for the `_shares` of the sender. Withdraw fee is deducted.
    * @param shares is the shares of the sender to withdraw
    */
-  function withdraw(uint256 shares) external {
+  function withdraw(uint256 shares) external nonReentrant {
     uint256 withdrawAmount = _withdraw(shares, true);
     IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
   }
@@ -321,7 +322,7 @@ contract PrincipalProtectedVault is ERC20 {
    * @param shares the number of this vault shares to be burned
    * @param vault the address of destination vault
    */
-  function withdrawToVault(uint256 shares, address vault) external {
+  function withdrawToVault(uint256 shares, address vault) external nonReentrant {
     require(vault != address(0), "!vault");
     require(withdrawMapping[address(this)][vault], "Withdraw to vault not allowed");
 
