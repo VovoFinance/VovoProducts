@@ -157,9 +157,9 @@ describe("PPV", function () {
         // expect(await ppv2.balanceOf(owner.address)).to.be.greaterThan("0");
         await ppv.connect(owner).revokeVault(ppv.address, ppv2.address);
         await expect(ppv.connect(owner).withdrawToVault("200000000000", ppv2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
-        // withdraw all
-        await ppv.connect(owner).withdrawAll();
-        expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
+        // // withdraw all
+        // await ppv.connect(owner).withdrawAll();
+        // expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
     })
 
     it("set governance", async() => {
