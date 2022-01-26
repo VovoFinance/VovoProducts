@@ -32,8 +32,8 @@ function assertAlmostEqual(actual, expected, accuracy = 1000) {
 }
 
 describe("PPV", function () {
-    this.timeout(500000);
-    let addrs = [], owner, governor, admin, keeper, rewards, ppv, ppv2, usdcContract, _2crvContract, gaugeContract, _2poolContract, gmxVaultContract;
+    this.timeout(5000000);
+    let addrs = [], owner, governor, admin, keeper, guardian, rewards, ppv, ppv2, usdcContract, _2crvContract, gaugeContract, _2poolContract, gmxVaultContract;
     const depositAmount = BigNumber.from("1000000000000"); // 1m usdc
     before(async () => {
         addrs = provider.getWallets();
@@ -42,8 +42,10 @@ describe("PPV", function () {
         admin = addrs[2];
         rewards = addrs[3];
         keeper = addrs[4];
+        guardian = addrs[5];
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
-        ppv = await ppvContract.connect(owner).deploy(
+        ppv = await ppvContract.connect(owner).deploy()
+        await ppv.initialize(
             "Vovo USDC PPV",
             "voUSDC",
             6,
@@ -58,8 +60,8 @@ describe("PPV", function () {
             "1000000", // vaultToken base: 1e6
             "1000000000000000000" // underlying base: 1e18
         )
-
-        ppv2 = await ppvContract.connect(owner).deploy(
+        ppv2 = await ppvContract.connect(owner).deploy();
+        await ppv2.initialize(
             "Vovo USDC PPV",
             "voUSDC",
             6,
@@ -123,7 +125,7 @@ describe("PPV", function () {
         await expect(ppv.connect(admin).poke()).to.be.revertedWith("!keepers");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("!poke time");
         // 1st poke after one day
-        await provider.send("evm_increaseTime", [86400*2])
+        await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
         console.log("share price1", (await ppv.getPricePerShare()).toString());
         const tx = await ppv.connect(owner).poke();
@@ -131,7 +133,7 @@ describe("PPV", function () {
         expect(await tx).to.emit(ppv, "OpenPosition");
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
-        await provider.send("evm_increaseTime", [86400*2])
+        await provider.send("evm_increaseTime", [86400*14])
         await provider.send("evm_mine")
         const tx2 = await ppv.connect(owner).poke();
         // expect(await tx2).to.emit(ppv, "ClosePosition");
@@ -178,15 +180,10 @@ describe("PPV", function () {
         await ppv.connect(admin).removeKeeper(keeper.address);
     })
 
-    it("set performance fee", async() => {
-        await expect(ppv.connect(admin).setPerformanceFee("3000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setPerformanceFee("3000");
+    it("set fees", async() => {
+        await expect(ppv.connect(admin).setFees("3000", "100")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setFees("3000", "100");
         expect((await ppv.performanceFee()).toString()).to.be.equal("3000");
-    })
-
-    it("set withdraw fee", async() => {
-        await expect(ppv.connect(admin).setWithdrawalFee("100")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setWithdrawalFee("100");
         expect((await ppv.withdrawalFee()).toString()).to.be.equal("100");
     })
 
@@ -209,14 +206,9 @@ describe("PPV", function () {
     })
 
     it("set DepositEnabled", async() => {
-        await expect(ppv.connect(admin).setDepositEnabled(false)).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setDepositEnabled(false);
+        await expect(ppv.connect(admin).setDepositEnabledAndCap(false, "1000000000000")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setDepositEnabledAndCap(false, "1000000000000");
         expect((await ppv.isDepositEnabled()).toString()).to.be.equal("false");
-    })
-
-    it("set cap", async() => {
-        await expect(ppv.connect(admin).setCap("1000000000000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setCap("1000000000000");
         expect((await ppv.cap()).toString()).to.be.equal("1000000000000");
     })
 
@@ -224,5 +216,19 @@ describe("PPV", function () {
         await expect(ppv.connect(admin).setPokeInterval("100000")).to.be.revertedWith("!governor");
         await ppv.connect(governor).setPokeInterval("100000");
         expect((await ppv.pokeInterval()).toString()).to.be.equal("100000");
+    })
+
+    it("pause contract", async() => {
+        await ppv.connect(governor).setGuardian(guardian.address);
+        await ppv.connect(guardian).pause();
+        await expect(ppv.connect(owner).deposit(depositAmount)).to.be.revertedWith("Pausable: paused");
+        await expect(ppv.connect(owner).withdraw(depositAmount)).to.be.revertedWith("Pausable: paused");
+        await expect(ppv.connect(owner).poke()).to.be.revertedWith("Pausable: paused");
+        await expect(ppv.connect(owner).earn()).to.be.revertedWith("Pausable: paused");
+        await ppv.connect(governor).unpause();
+        expect(ppv.connect(owner).deposit(depositAmount));
+        expect(ppv.connect(owner).withdraw(depositAmount));
+        expect(ppv.connect(owner).poke());
+        expect(ppv.connect(owner).earn());
     })
 });

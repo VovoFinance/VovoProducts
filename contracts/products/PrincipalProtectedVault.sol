@@ -3,25 +3,27 @@ pragma solidity ^0.7.6;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import '@openzeppelin/contracts-upgradeable/proxy/Initializable.sol';
+import '@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol';
+import '@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol';
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 import "../interfaces/IVovoVault.sol";
 import "../interfaces/curve/Gauge.sol";
 import "../interfaces/curve/Curve.sol";
 import "../interfaces/uniswap/Uni.sol";
 import "../interfaces/gmx/IRouter.sol";
 import "../interfaces/gmx/IVault.sol";
-import "../interfaces/uniswap/IUniswapV2Factory.sol";
-import "../interfaces/uniswap/IUniswapV2Pair.sol";
 
 /**
  * @title PrincipalProtectedVault
  * @dev A vault that receives vaultToken from users, and then deposits the vaultToken into yield farming pools.
  * Periodically, the vault collects the yield rewards and uses the rewards to open a leverage trade on a perpetual swap exchange.
  */
-contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
+contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpgradeable, ReentrancyGuardUpgradeable {
   using SafeERC20 for IERC20;
   using Address for address;
   using SafeMath for uint256;
@@ -38,17 +40,14 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   address public constant gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
   // sushiswap address
   address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
-  // sushiswap factory address
-  address public constant sushiFactory = address(0xc35DADB65012eC5796536bD9864eD8773aBc74C4);
 
-  uint256 public constant usdcBase = 1e6;
   uint256 public constant FEE_DENOMINATOR = 10000;
   uint256 public constant DENOMINATOR = 10000;
 
-  address vaultToken; // deposited token of the vault
-  address underlying; // underlying token of the leverage position
-  address lpToken;
-  address gauge;
+  address public vaultToken; // deposited token of the vault
+  address public underlying; // underlying token of the leverage position
+  address public lpToken;
+  address public gauge;
   uint256 public withdrawalFee;
   uint256 public performanceFee;
   uint256 public slip;
@@ -61,15 +60,16 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   uint256 public lastPokeTime;
   uint256 public pokeInterval;
   uint256 public currentTokenReward;
-  bool isKeeperOnly;
+  uint256 public currentPokeInterval;
+  bool public isKeeperOnly;
   bool public isDepositEnabled;
   uint256 public leverage;
   bool public isLong;
   address public governor;
   address public admin;
+  address public guardian;
   address public rewards;
   address public dex;
-  address public dexFactory;
   /// mapping(keeperAddress => true/false)
   mapping(address => bool) public keepers;
   /// mapping(fromVault => mapping(toVault => true/false))
@@ -79,14 +79,14 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event GaugeDeposited(uint256 lpDeposited);
   event Harvested(uint256 amount, uint256 totalFarmReward);
-  event OpenPosition(address underlying, uint256 sizeDelta, bool isLong);
-  event ClosePosition(address underlying, uint256 sizeDelta, bool isLong, uint256 pnl, uint256 fee);
+  event OpenPosition(address underlying, uint256 sizeDelta, bool isLong, uint256 collateralAmount);
+  event ClosePosition(address underlying, uint256 sizeDelta, bool isLong, uint256 earning, uint256 fee);
   event Withdraw(address to, uint256 amount, uint256 fee);
   event WithdrawToVault(address owner, uint256 shares, address vault, uint256 receivedShares);
   event GovernanceSet(address governor);
   event AdminSet(address admin);
-  event PerformanceFeeSet(uint256 performanceFee);
-  event WithdrawalFeeSet(uint256 withdrawalFee);
+  event GuardianSet(address guardian);
+  event FeeSet(uint256 performanceFee, uint256 withdrawalFee);
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
@@ -101,7 +101,7 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   event VaultRegistered(address fromVault, address toVault);
   event VaultRevoked(address fromVault, address toVault);
 
-  constructor(
+  function initialize(
     string memory _vaultName,
     string memory _vaultSymbol,
     uint8 _vaultDecimal,
@@ -115,8 +115,10 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     uint256 _cap,
     uint256 _vaultTokenBase,
     uint256 _underlyingBase
-  ) ERC20(_vaultName, _vaultSymbol) public {
+  ) public initializer {
+    __ERC20_init(_vaultName, _vaultSymbol);
     _setupDecimals(_vaultDecimal);
+    __Pausable_init();
     vaultToken = _vaultToken;
     underlying = _underlying;
     lpToken = _lpToken;
@@ -128,35 +130,37 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     vaultTokenBase = _vaultTokenBase;
     underlyingBase = _underlyingBase;
     lastPokeTime = block.timestamp;
-    pokeInterval = 1 days;
+    pokeInterval = 7 days;
     governor = msg.sender;
     admin = msg.sender;
+    guardian = msg.sender;
     dex = sushiswap;
-    dexFactory = sushiFactory;
     keepers[msg.sender] = true;
     isKeeperOnly = true;
     isDepositEnabled = true;
-    withdrawalFee = 50;
-    performanceFee = 2000;
+    withdrawalFee = 30;
+    performanceFee = 1000;
     slip = 30;
     maxCollateralMultiplier = leverage;
   }
 
 
   /**
-   * @notice Get the value of this vault in vaultToken: the value of lp in vaultToken + the amount of vaultToken
+   * @notice Get the value of this vault in vaultToken:
+   * the value of lp in vaultToken + the amount of vaultToken in this contract +
+   * the value of open leveraged position + estimated pending rewards
    */
   function balance() public view returns (uint256) {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
     uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
     uint256 lpValue = lpPrice.mul(lpAmount).mul(vaultTokenBase).div(1e36);
-    return lpValue.add(getActivePositionValue()).add(IERC20(vaultToken).balanceOf(address(this)));
+    return lpValue.add(getActivePositionValue()).add(getEstimatedPendingRewardValue()).add(IERC20(vaultToken).balanceOf(address(this)));
   }
 
   /**
    * @notice Add liquidity to curve and deposit the LP tokens to gauge
    */
-  function earn() public {
+  function earn() whenNotPaused public {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     uint256 tokenBalance = IERC20(vaultToken).balanceOf(address(this));
     if (tokenBalance > 0) {
@@ -186,7 +190,7 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @notice Deposit token to this vault. The vault mints shares to the depositor.
    * @param amount is the amount of token deposited
    */
-  function deposit(uint256 amount) public nonReentrant {
+  function deposit(uint256 amount) public whenNotPaused nonReentrant {
     uint256 _pool = balance();
     require(isDepositEnabled && _pool.add(amount) < cap, "!deposit");
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
@@ -209,9 +213,10 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @notice 1. Collect reward from Curve Gauge; 2. Close old leverage trade;
              3. Use the reward to open new leverage trade; 4. Deposit the trade profit and new user deposits into Curve to earn reward
    */
-  function poke() external nonReentrant {
+  function poke() external whenNotPaused nonReentrant {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
-    require(lastPokeTime + pokeInterval < block.timestamp, "!poke time");
+    require(lastPokeTime.add(pokeInterval) < block.timestamp, "!poke time");
+    currentPokeInterval = block.timestamp.sub(lastPokeTime);
     uint256 tokenReward = 0;
     if (Gauge(gauge).balanceOf(address(this)) > 0) {
       tokenReward = collectReward();
@@ -226,18 +231,18 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
   }
 
   /**
-   * @notice Claim rewards from the gauge and swap the rewards to the underlying token
-   * @return tokenReward the amount of underlying swapped from farm reward
+   * @notice Claim rewards from the gauge and swap the rewards to the vault token
+   * @return tokenReward the amount of vault token swapped from farm reward
    */
   function collectReward() private returns(uint256 tokenReward) {
-    uint256 _before = IERC20(underlying).balanceOf(address(this));
+    uint256 _before = IERC20(vaultToken).balanceOf(address(this));
     Gauge(gauge).claim_rewards(address(this));
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
       IERC20(crv).safeApprove(dex, 0);
       IERC20(crv).safeApprove(dex, _crv);
       address[] memory path;
-      if (underlying == weth) {
+      if (vaultToken == weth) {
         path = new address[](2);
         path[0] = crv;
         path[1] = weth;
@@ -245,11 +250,11 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
         path = new address[](3);
         path[0] = crv;
         path[1] = weth;
-        path[2] = underlying;
+        path[2] = vaultToken;
       }
       Uni(dex).swapExactTokensForTokens(_crv, 0, path, address(this), block.timestamp.add(1800))[path.length - 1];
     }
-    uint256 _after = IERC20(underlying).balanceOf(address(this));
+    uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     tokenReward = _after.sub(_before);
     totalFarmReward = totalFarmReward.add(tokenReward);
     emit Harvested(tokenReward, totalFarmReward);
@@ -260,14 +265,22 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @param amount the amount of token be used as leverage position collateral
    */
   function openTrade(uint256 amount) private {
-    address[] memory _path = new address[](1);
-    _path[0] = underlying;
-    uint256 _price = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
-    uint256 _sizeDelta = leverage.mul(amount).mul(_price).div(underlyingBase);
-    IERC20(underlying).safeApprove(gmxRouter, 0);
-    IERC20(underlying).safeApprove(gmxRouter, amount);
-    IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _price);
-    emit OpenPosition(underlying, _sizeDelta, isLong);
+    address[] memory _path;
+    if (vaultToken == underlying) {
+      _path = new address[](1);
+      _path[0] = vaultToken;
+    } else {
+      _path = new address[](2);
+      _path[0] = vaultToken;
+      _path[1] = underlying;
+    }
+    uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
+    uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
+    uint256 _sizeDelta = leverage.mul(amount).mul(1e30).div(_vaultTokenPrice).mul(1e30).div(vaultTokenBase);
+    IERC20(vaultToken).safeApprove(gmxRouter, 0);
+    IERC20(vaultToken).safeApprove(gmxRouter, amount);
+    IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
+    emit OpenPosition(underlying, _sizeDelta, isLong, amount);
   }
 
   /**
@@ -312,7 +325,7 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @notice Withdraw the funds for the `_shares` of the sender. Withdraw fee is deducted.
    * @param shares is the shares of the sender to withdraw
    */
-  function withdraw(uint256 shares) external nonReentrant {
+  function withdraw(uint256 shares) external whenNotPaused nonReentrant {
     uint256 withdrawAmount = _withdraw(shares, true);
     IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
   }
@@ -322,7 +335,7 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @param shares the number of this vault shares to be burned
    * @param vault the address of destination vault
    */
-  function withdrawToVault(uint256 shares, address vault) external nonReentrant {
+  function withdrawToVault(uint256 shares, address vault) external whenNotPaused nonReentrant {
     require(vault != address(0), "!vault");
     require(withdrawMapping[address(this)][vault], "Withdraw to vault not allowed");
 
@@ -367,8 +380,7 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
    * @notice Withdraw the asset that is accidentally sent to this address
    * @param _asset is the token to withdraw
    */
-  function withdrawAsset(address _asset) external {
-    require(msg.sender == governor, "!governor");
+  function withdrawAsset(address _asset) external onlyGovernor {
     require(_asset != vaultToken, "!vaultToken");
     IERC20(_asset).safeTransfer(msg.sender, IERC20(_asset).balanceOf(address(this)));
   }
@@ -395,6 +407,8 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
   }
 
+  /// ===== View Functions =====
+
   function getPricePerShare() external view returns (uint256) {
     return balance().mul(1e18).div(totalSupply());
   }
@@ -420,6 +434,18 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     return positionValue;
   }
 
+  /**
+   * @notice get the estimated pending reward value in vaultToken, based on the reward from last period
+   */
+  function getEstimatedPendingRewardValue() public view returns(uint256) {
+    if (currentPokeInterval == 0) {
+      return 0;
+    }
+    return currentTokenReward.mul(block.timestamp.sub(lastPokeTime)).div(currentPokeInterval);
+  }
+
+  /// ===== Permissioned Actions: Governance =====
+
   function setGovernance(address _governor) external onlyGovernor {
     governor = _governor;
     emit GovernanceSet(governor);
@@ -431,14 +457,17 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     emit AdminSet(admin);
   }
 
-  function setPerformanceFee(uint256 _performanceFee) external onlyGovernor {
-    performanceFee = _performanceFee;
-    emit PerformanceFeeSet(performanceFee);
+  function setGuardian(address _guardian) external onlyGovernor {
+    guardian = _guardian;
+    emit GuardianSet(guardian);
   }
 
-  function setWithdrawalFee(uint256 _withdrawalFee) external onlyGovernor {
+  function setFees(uint256 _performanceFee, uint256 _withdrawalFee) external onlyGovernor {
+    // ensure performanceFee is smaller than 50% and withdraw fee is smaller than 5%
+    require(_performanceFee < 5000 && _withdrawalFee < 500, "!too-much");
+    performanceFee = _performanceFee;
     withdrawalFee = _withdrawalFee;
-    emit WithdrawalFeeSet(withdrawalFee);
+    emit FeeSet(performanceFee, withdrawalFee);
   }
 
   function setLeverage(uint256 _leverage) external onlyGovernor {
@@ -453,41 +482,40 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     emit isLongSet(isLong);
   }
 
-  function setRewards(address _rewards) public onlyGovernor {
+  function setRewards(address _rewards) external onlyGovernor {
     rewards = _rewards;
     emit RewardsSet(rewards);
   }
 
-  function setSlip(uint256 _slip) public onlyGovernor {
+  function setSlip(uint256 _slip) external onlyGovernor {
     slip = _slip;
     emit SlipSet(slip);
   }
 
-  function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) public onlyGovernor {
+  function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) external onlyGovernor {
     require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50, "!maxCollateralMultiplier");
     maxCollateralMultiplier = _maxCollateralMultiplier;
     emit MaxCollateralMultiplierSet(maxCollateralMultiplier);
   }
 
-  function setIsKeeperOnly(bool _isKeeperOnly) public onlyGovernor {
+  function setIsKeeperOnly(bool _isKeeperOnly) external onlyGovernor {
     isKeeperOnly = _isKeeperOnly;
     emit IsKeeperOnlySet(_isKeeperOnly);
   }
 
-  function setDepositEnabled(bool _flag) public onlyGovernor {
+  function setDepositEnabledAndCap(bool _flag, uint256 _cap) external onlyGovernor {
     isDepositEnabled = _flag;
-    emit DepositEnabled(isDepositEnabled);
-  }
-
-  function setCap(uint256 _cap) public onlyGovernor {
     cap = _cap;
+    emit DepositEnabled(isDepositEnabled);
     emit CapSet(cap);
   }
 
-  function setPokeInterval(uint256 _pokeInterval) public onlyGovernor {
+  function setPokeInterval(uint256 _pokeInterval) external onlyGovernor {
     pokeInterval = _pokeInterval;
     emit PokeIntervalSet(pokeInterval);
   }
+
+  // ===== Permissioned Actions: Admin =====
 
   function addKeeper(address _keeper) external onlyAdmin {
     keepers[_keeper] = true;
@@ -509,6 +537,20 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
     emit VaultRevoked(fromVault, toVault);
   }
 
+  /// ===== Permissioned Actions: Guardian =====
+
+  function pause() external onlyGuardian {
+    _pause();
+  }
+
+  /// ===== Permissioned Actions: Governance =====
+
+  function unpause() external onlyGovernor {
+    _unpause();
+  }
+
+  /// ===== Modifiers =====
+
   modifier onlyGovernor() {
     require(msg.sender == governor, "!governor");
     _;
@@ -516,6 +558,11 @@ contract PrincipalProtectedVault is ERC20, ReentrancyGuard {
 
   modifier onlyAdmin() {
     require(msg.sender == admin, "!admin");
+    _;
+  }
+
+  modifier onlyGuardian() {
+    require(msg.sender == guardian, "!pausers");
     _;
   }
 

@@ -46,7 +46,8 @@ describe("PPV WBTC", function () {
         rewards = addrs[3];
         keeper = addrs[4];
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
-        ppv = await ppvContract.connect(owner).deploy(
+        ppv = await ppvContract.connect(owner).deploy()
+        await ppv.initialize(
             "Vovo WBTC PPV",
             "voBTC",
             8,
@@ -61,8 +62,8 @@ describe("PPV WBTC", function () {
             "100000000", // vaultToken base: 1e8
             "1000000000000000000" // underlying base: 1e8
         )
-
-        ppv2 = await ppvContract.connect(owner).deploy(
+        ppv2 = await ppvContract.connect(owner).deploy()
+        await ppv2.initialize(
             "Vovo WBTC PPV",
             "voBTC",
             8,
@@ -123,14 +124,14 @@ describe("PPV WBTC", function () {
         const virtualPrice = await lpContract.get_virtual_price();
         console.log("virtual price", virtualPrice.toString())
         const expectedDepositedLP = depositAmount.mul("10000000000000000000000000000").div(virtualPrice);
-        assertAlmostEqual(await gaugeContract.balanceOf(ppv.address), expectedDepositedLP);
+        assertAlmostEqual(await gaugeContract.balanceOf(ppv.address), expectedDepositedLP, 100);
     }).timeout(500000)
 
     it("poke", async() => {
         await expect(ppv.connect(admin).poke()).to.be.revertedWith("!keepers");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("!poke time");
         // 1st poke after one day
-        await provider.send("evm_increaseTime", [86400*2])
+        await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
         console.log("share price1", (await ppv.getPricePerShare()).toString());
         const tx = await ppv.connect(owner).poke();
@@ -138,7 +139,7 @@ describe("PPV WBTC", function () {
         expect(await tx).to.emit(ppv, "OpenPosition");
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
-        await provider.send("evm_increaseTime", [86400*2])
+        await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
         const tx2 = await ppv.connect(owner).poke();
         // expect(await tx2).to.emit(ppv, "ClosePosition");
@@ -185,14 +186,9 @@ describe("PPV WBTC", function () {
     })
 
     it("set performance fee", async() => {
-        await expect(ppv.connect(admin).setPerformanceFee("3000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setPerformanceFee("3000");
+        await expect(ppv.connect(admin).setFees("3000", "100")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setFees("3000", "100");
         expect((await ppv.performanceFee()).toString()).to.be.equal("3000");
-    })
-
-    it("set withdraw fee", async() => {
-        await expect(ppv.connect(admin).setWithdrawalFee("100")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setWithdrawalFee("100");
         expect((await ppv.withdrawalFee()).toString()).to.be.equal("100");
     })
 
@@ -215,14 +211,9 @@ describe("PPV WBTC", function () {
     })
 
     it("set DepositEnabled", async() => {
-        await expect(ppv.connect(admin).setDepositEnabled(false)).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setDepositEnabled(false);
+        await expect(ppv.connect(admin).setDepositEnabledAndCap(false, "1000000000000")).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setDepositEnabledAndCap(false, "1000000000000");
         expect((await ppv.isDepositEnabled()).toString()).to.be.equal("false");
-    })
-
-    it("set cap", async() => {
-        await expect(ppv.connect(admin).setCap("1000000000000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setCap("1000000000000");
         expect((await ppv.cap()).toString()).to.be.equal("1000000000000");
     })
 
