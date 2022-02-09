@@ -316,7 +316,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /**
    * @notice Withdraw all the funds of the sender
    */
-  function withdrawAll() external nonReentrant {
+  function withdrawAll() external whenNotPaused nonReentrant {
     uint256 withdrawAmount = _withdraw(balanceOf(msg.sender), true);
     IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
   }

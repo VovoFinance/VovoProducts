@@ -223,12 +223,14 @@ describe("PPV", function () {
         await ppv.connect(guardian).pause();
         await expect(ppv.connect(owner).deposit(depositAmount)).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).withdraw(depositAmount)).to.be.revertedWith("Pausable: paused");
+        await expect(ppv.connect(owner).withdrawAll()).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).earn()).to.be.revertedWith("Pausable: paused");
         await ppv.connect(governor).unpause();
         expect(ppv.connect(owner).deposit(depositAmount));
-        expect(ppv.connect(owner).withdraw(depositAmount));
         expect(ppv.connect(owner).poke());
         expect(ppv.connect(owner).earn());
+        expect(ppv.connect(owner).withdraw(depositAmount/2));
+        expect(ppv.connect(owner).withdrawAll());
     })
 });
