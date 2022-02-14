@@ -109,7 +109,7 @@ describe("PPV WBTC", function () {
         await wbtcContract.connect(owner).approve(ppv.address, depositAmount.mul(2))
         await ppv.connect(owner).deposit(depositAmount.mul(2))
         expect(await ppv.balanceOf(owner.address)).to.be.equal(depositAmount.mul(2))
-        expect(await ppv.getPricePerShare()).to.be.equal("1000000000000000000")
+        expect(await ppv.getPricePerShare(true)).to.be.equal("1000000000000000000")
 
         // withdraw half
         await ppv.connect(owner).withdraw(depositAmount);
@@ -133,7 +133,7 @@ describe("PPV WBTC", function () {
         // 1st poke after one day
         await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
-        console.log("share price1", (await ppv.getPricePerShare()).toString());
+        console.log("share price1", (await ppv.getPricePerShare(true)).toString());
         const tx = await ppv.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         expect(await tx).to.emit(ppv, "OpenPosition");
@@ -146,7 +146,7 @@ describe("PPV WBTC", function () {
         const position2 = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         expect(await tx2).to.emit(ppv, "ClosePosition");
         expect(await tx2).to.emit(ppv, "OpenPosition");
-        console.log("share price2", (await ppv.getPricePerShare()).toString());
+        console.log("share price2", (await ppv.getPricePerShare(true)).toString());
     }).timeout(500000)
 
     it("withdraw", async() => {
@@ -164,9 +164,6 @@ describe("PPV WBTC", function () {
         expect(await ppv.balanceOf(owner.address)).to.be.equal(beforeBalance.div(4));
         await ppv.connect(owner).revokeVault(ppv.address, ppv2.address);
         await expect(ppv.connect(owner).withdrawToVault(beforeBalance.div(4), ppv2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
-        // withdraw all
-        await ppv.connect(owner).withdrawAll();
-        expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
     })
 
     it("set governance", async() => {

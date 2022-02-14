@@ -52,8 +52,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   uint256 public performanceFee;
   uint256 public slip;
   uint256 public maxCollateralMultiplier;
-  uint256 public totalFarmReward; // lifetime farm reward earnings
-  uint256 public totalTradeProfit; // lifetime trade profit
   uint256 public cap;
   uint256 public vaultTokenBase;
   uint256 public underlyingBase;
@@ -75,13 +73,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
-  event Minted(address to, uint256 shares);
+  event Deposit(address to, uint256 amount, uint256 shares, uint256 pricePerShare, uint256 totalSupply);
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event GaugeDeposited(uint256 lpDeposited);
-  event Harvested(uint256 amount, uint256 totalFarmReward);
-  event OpenPosition(address underlying, uint256 sizeDelta, bool isLong, uint256 collateralAmount);
-  event ClosePosition(address underlying, uint256 sizeDelta, bool isLong, uint256 earning, uint256 fee);
-  event Withdraw(address to, uint256 amount, uint256 fee);
+  event Poked(uint256 minPricePerShare, uint256 maxPricePerShare);
+  event OpenPosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice, uint256 sizeDelta, bool isLong, uint256 collateralAmount);
+  event ClosePosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice,uint256 sizeDelta, bool isLong, uint256 earning, uint256 fee);
+  event Withdraw(address to, uint256 amount, uint256 shares, uint256 fee, uint256 pricePerShare, uint256 totalSupply);
   event WithdrawToVault(address owner, uint256 shares, address vault, uint256 receivedShares);
   event GovernanceSet(address governor);
   event AdminSet(address admin);
@@ -147,14 +145,18 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
 
   /**
    * @notice Get the value of this vault in vaultToken:
-   * the value of lp in vaultToken + the amount of vaultToken in this contract +
-   * the value of open leveraged position + estimated pending rewards
+   * @param isMax the flag for optimistic or pessimistic calculation of the vault value
+   * if isMax is true: the value of lp in vaultToken + the amount of vaultToken in this contract + the value of open leveraged position + estimated pending rewards
+   * if isMax is false: the value of lp in vaultToken + the amount of vaultToken in this contract
    */
-  function balance() public view returns (uint256) {
+  function balance(bool isMax) public view returns (uint256) {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
     uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
     uint256 lpValue = lpPrice.mul(lpAmount).mul(vaultTokenBase).div(1e36);
-    return lpValue.add(getActivePositionValue()).add(getEstimatedPendingRewardValue()).add(IERC20(vaultToken).balanceOf(address(this)));
+    if (isMax) {
+      return lpValue.add(getActivePositionValue()).add(getEstimatedPendingRewardValue()).add(IERC20(vaultToken).balanceOf(address(this)));
+    }
+    return lpValue.add(IERC20(vaultToken).balanceOf(address(this)));
   }
 
   /**
@@ -180,23 +182,16 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   }
 
   /**
-   * @notice Deposit all the token balance of the sender to this vault
-   */
-  function depositAll() external nonReentrant {
-    deposit(IERC20(vaultToken).balanceOf(msg.sender));
-  }
-
-  /**
    * @notice Deposit token to this vault. The vault mints shares to the depositor.
    * @param amount is the amount of token deposited
    */
   function deposit(uint256 amount) public whenNotPaused nonReentrant {
-    uint256 _pool = balance();
+    uint256 _pool = balance(true); // use max vault balance for deposit
     require(isDepositEnabled && _pool.add(amount) < cap, "!deposit");
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
     IERC20(vaultToken).safeTransferFrom(msg.sender, address(this), amount);
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
-    amount = _after.sub(_before); // Additional check for deflationary tokens
+    amount = _after.sub(_before);
     uint256 shares = 0;
     if (totalSupply() == 0) {
       shares = amount;
@@ -205,7 +200,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     require(shares > 0, "!shares");
     _mint(msg.sender, shares);
-    emit Minted(msg.sender, shares);
+    emit Deposit(msg.sender, amount, shares, getPricePerShare(false), totalSupply());
   }
 
 
@@ -228,6 +223,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     currentTokenReward = tokenReward;
     earn();
     lastPokeTime = block.timestamp;
+    emit Poked(getPricePerShare(false), getPricePerShare(true));
   }
 
   /**
@@ -256,8 +252,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     tokenReward = _after.sub(_before);
-    totalFarmReward = totalFarmReward.add(tokenReward);
-    emit Harvested(tokenReward, totalFarmReward);
   }
 
   /**
@@ -280,7 +274,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     IERC20(vaultToken).safeApprove(gmxRouter, 0);
     IERC20(vaultToken).safeApprove(gmxRouter, amount);
     IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
-    emit OpenPosition(underlying, _sizeDelta, isLong, amount);
+    emit OpenPosition(underlying, _underlyingPrice, _vaultTokenPrice, _sizeDelta, isLong, amount);
   }
 
   /**
@@ -288,19 +282,21 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    */
   function closeTrade() private {
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
+    uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
     if (size == 0) {
+      emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, 0, 0);
       return;
     }
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
-    uint256 price = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     if (underlying == vaultToken) {
-      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), price);
+      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
       path[0] = underlying;
       path[1] = vaultToken;
-      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), price, 0);
+      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
@@ -308,17 +304,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     if (_tradeProfit > 0) {
       _fee = _tradeProfit.mul(performanceFee).div(FEE_DENOMINATOR);
       IERC20(vaultToken).safeTransfer(rewards, _fee);
-      totalTradeProfit = totalTradeProfit.add(_tradeProfit.sub(_fee));
     }
-    emit ClosePosition(underlying, size, isLong, _tradeProfit.sub(_fee), _fee);
-  }
-
-  /**
-   * @notice Withdraw all the funds of the sender
-   */
-  function withdrawAll() external whenNotPaused nonReentrant {
-    uint256 withdrawAmount = _withdraw(balanceOf(msg.sender), true);
-    IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
+    emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, _tradeProfit, _fee);
   }
 
   /**
@@ -346,13 +333,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     uint256 receivedShares = IERC20(vault).balanceOf(address(this));
     IERC20(vault).safeTransfer(msg.sender, receivedShares);
 
-    emit Withdraw(msg.sender, withdrawAmount, 0);
+    emit Withdraw(msg.sender, withdrawAmount, shares, 0, getPricePerShare(false), totalSupply());
     emit WithdrawToVault(msg.sender, shares, vault, receivedShares);
   }
 
   function _withdraw(uint256 shares, bool shouldChargeFee) private returns(uint256 withdrawAmount) {
     require(shares > 0, "!shares");
-    uint256 r = (balance().mul(shares)).div(totalSupply());
+    uint256 r = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for deposit
     _burn(msg.sender, shares);
 
     uint256 b = IERC20(vaultToken).balanceOf(address(this));
@@ -373,7 +360,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
       IERC20(vaultToken).safeTransfer(rewards, fee);
     }
     withdrawAmount = r.sub(fee);
-    emit Withdraw(msg.sender, withdrawAmount, fee);
+    emit Withdraw(msg.sender, withdrawAmount, shares, fee, getPricePerShare(false), totalSupply());
   }
 
   /**
@@ -409,8 +396,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
 
   /// ===== View Functions =====
 
-  function getPricePerShare() external view returns (uint256) {
-    return balance().mul(1e18).div(totalSupply());
+  function getPricePerShare(bool isMax) public view returns (uint256) {
+    return balance(isMax).mul(1e18).div(totalSupply());
   }
 
   /**

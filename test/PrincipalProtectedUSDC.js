@@ -100,7 +100,7 @@ describe("PPV", function () {
         await usdcContract.connect(owner).approve(ppv.address, depositAmount.mul(2))
         await ppv.connect(owner).deposit(depositAmount.mul(2))
         expect(await ppv.balanceOf(owner.address)).to.be.equal(depositAmount.mul(2))
-        expect(await ppv.getPricePerShare()).to.be.equal("1000000000000000000")
+        expect(await ppv.getPricePerShare(true)).to.be.equal("1000000000000000000")
         // await usdcContract.connect(owner).approve(ppv.address, depositAmount)
         // await ppv.connect(owner).deposit(depositAmount)
 
@@ -127,9 +127,12 @@ describe("PPV", function () {
         // 1st poke after one day
         await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
-        console.log("share price1", (await ppv.getPricePerShare()).toString());
+        console.log("share price1 min", (await ppv.getPricePerShare(false)).toString());
+        console.log("share price1 max", (await ppv.getPricePerShare(true)).toString());
         const tx = await ppv.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
+        console.log("balance min", (await ppv.balance(false)).toString());
+        console.log("balance max", (await ppv.balance(true)).toString())
         expect(await tx).to.emit(ppv, "OpenPosition");
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
@@ -140,7 +143,8 @@ describe("PPV", function () {
         const position2 = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         expect(await tx2).to.emit(ppv, "ClosePosition");
         expect(await tx2).to.emit(ppv, "OpenPosition");
-        console.log("share price2", (await ppv.getPricePerShare()).toString());
+        console.log("share price2 min", (await ppv.getPricePerShare(false)).toString());
+        console.log("share price2 max", (await ppv.getPricePerShare(true)).toString());
     }).timeout(500000)
 
     it("withdraw", async() => {
@@ -159,9 +163,6 @@ describe("PPV", function () {
         // expect(await ppv2.balanceOf(owner.address)).to.be.greaterThan("0");
         await ppv.connect(owner).revokeVault(ppv.address, ppv2.address);
         await expect(ppv.connect(owner).withdrawToVault("200000000000", ppv2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
-        // withdraw all
-        await ppv.connect(owner).withdrawAll();
-        expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
     })
 
     it("set governance", async() => {
@@ -223,7 +224,6 @@ describe("PPV", function () {
         await ppv.connect(guardian).pause();
         await expect(ppv.connect(owner).deposit(depositAmount)).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).withdraw(depositAmount)).to.be.revertedWith("Pausable: paused");
-        await expect(ppv.connect(owner).withdrawAll()).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("Pausable: paused");
         await expect(ppv.connect(owner).earn()).to.be.revertedWith("Pausable: paused");
         await ppv.connect(governor).unpause();
@@ -231,6 +231,5 @@ describe("PPV", function () {
         expect(ppv.connect(owner).poke());
         expect(ppv.connect(owner).earn());
         expect(ppv.connect(owner).withdraw(depositAmount/2));
-        expect(ppv.connect(owner).withdrawAll());
     })
 });
