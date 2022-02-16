@@ -73,13 +73,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
-  event Deposit(address to, uint256 amount, uint256 shares, uint256 pricePerShare, uint256 totalSupply);
+  event Deposit(address account, uint256 amount, uint256 shares);
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event GaugeDeposited(uint256 lpDeposited);
   event Poked(uint256 minPricePerShare, uint256 maxPricePerShare);
-  event OpenPosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice, uint256 sizeDelta, bool isLong, uint256 collateralAmount);
-  event ClosePosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice,uint256 sizeDelta, bool isLong, uint256 earning, uint256 fee);
-  event Withdraw(address to, uint256 amount, uint256 shares, uint256 fee, uint256 pricePerShare, uint256 totalSupply);
+  event OpenPosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice, uint256 sizeDelta, bool isLong, uint256 collateralAmountVaultToken);
+  event ClosePosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice,uint256 sizeDelta, bool isLong, uint256 collateralAmountVaultToken, uint256 fee);
+  event Withdraw(address account, uint256 amount, uint256 shares, uint256 fee);
   event WithdrawToVault(address owner, uint256 shares, address vault, uint256 receivedShares);
   event GovernanceSet(address governor);
   event AdminSet(address admin);
@@ -200,7 +200,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     require(shares > 0, "!shares");
     _mint(msg.sender, shares);
-    emit Deposit(msg.sender, amount, shares, getPricePerShare(false), totalSupply());
+    emit Deposit(msg.sender, amount, shares);
   }
 
 
@@ -260,13 +260,14 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    */
   function openTrade(uint256 amount) private {
     address[] memory _path;
-    if (vaultToken == underlying) {
+    address collateral = isLong ? underlying : usdc;
+    if (vaultToken == collateral) {
       _path = new address[](1);
       _path[0] = vaultToken;
     } else {
       _path = new address[](2);
       _path[0] = vaultToken;
-      _path[1] = underlying;
+      _path[1] = collateral;
     }
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
     uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
@@ -284,17 +285,18 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
+    address collateral = isLong ? underlying : usdc;
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, 0, 0);
       return;
     }
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
     if (underlying == vaultToken) {
-      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
+      IRouter(gmxRouter).decreasePosition(collateral, underlying, 0, size, isLong, address(this), _underlyingPrice);
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
-      path[0] = underlying;
+      path[0] = collateral;
       path[1] = vaultToken;
       IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
     }
@@ -333,7 +335,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     uint256 receivedShares = IERC20(vault).balanceOf(address(this));
     IERC20(vault).safeTransfer(msg.sender, receivedShares);
 
-    emit Withdraw(msg.sender, withdrawAmount, shares, 0, getPricePerShare(false), totalSupply());
+    emit Withdraw(msg.sender, withdrawAmount, shares, 0);
     emit WithdrawToVault(msg.sender, shares, vault, receivedShares);
   }
 
@@ -360,7 +362,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
       IERC20(vaultToken).safeTransfer(rewards, fee);
     }
     withdrawAmount = r.sub(fee);
-    emit Withdraw(msg.sender, withdrawAmount, shares, fee, getPricePerShare(false), totalSupply());
+    emit Withdraw(msg.sender, r, shares, fee);
   }
 
   /**

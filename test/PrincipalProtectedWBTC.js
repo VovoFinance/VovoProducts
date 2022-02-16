@@ -73,7 +73,7 @@ describe("PPV WBTC", function () {
             gauge, // gauge
             owner.address, // rewards
             "20", // leverage
-            true, // isLong
+            false, // isLong
             "10000000000", // cap: 100 btc
             "100000000", // vaultToken base: 1e8
             "1000000000000000000" // underlying base: 1e8
@@ -130,13 +130,22 @@ describe("PPV WBTC", function () {
     it("poke", async() => {
         await expect(ppv.connect(admin).poke()).to.be.revertedWith("!keepers");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("!poke time");
-        // 1st poke after one day
+
+        await wbtcContract.connect(owner).approve(ppv2.address, depositAmount.mul(2))
+        await ppv2.connect(owner).deposit(depositAmount);
+        await ppv2.connect(owner).earn();
+
+        // 1st poke after one week
         await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
         console.log("share price1", (await ppv.getPricePerShare(true)).toString());
         const tx = await ppv.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         expect(await tx).to.emit(ppv, "OpenPosition");
+
+        const tx1 = await ppv2.connect(owner).poke();
+        expect(await tx1).to.emit(ppv, "OpenPosition");
+
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
         await provider.send("evm_increaseTime", [86400*7])

@@ -71,10 +71,10 @@ describe("PPV", function () {
             "0xbF7E49483881C76487b0989CD7d9A8239B20CA41", // gauge
             owner.address, // rewards
             "20", // leverage
-            true, // isLong
+            false, // isLong
             "10000000000000", // cap: 10m usdc
-            6, // vaultToken base
-            18 // underlying base
+            "1000000", // vaultToken base
+            "1000000000000000000" // underlying base
         )
 
         await network.provider.request({
@@ -124,16 +124,27 @@ describe("PPV", function () {
     it("poke", async() => {
         await expect(ppv.connect(admin).poke()).to.be.revertedWith("!keepers");
         await expect(ppv.connect(owner).poke()).to.be.revertedWith("!poke time");
+
+        await usdcContract.connect(owner).approve(ppv2.address, depositAmount)
+        await ppv2.connect(owner).deposit(depositAmount);
+        await ppv2.connect(owner).earn();
+
+
         // 1st poke after one day
         await provider.send("evm_increaseTime", [86400*7])
         await provider.send("evm_mine")
         console.log("share price1 min", (await ppv.getPricePerShare(false)).toString());
         console.log("share price1 max", (await ppv.getPricePerShare(true)).toString());
+
         const tx = await ppv.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         console.log("balance min", (await ppv.balance(false)).toString());
         console.log("balance max", (await ppv.balance(true)).toString())
         expect(await tx).to.emit(ppv, "OpenPosition");
+
+        const tx1 = await ppv2.connect(owner).poke();
+        expect(await tx1).to.emit(ppv2, "OpenPosition");
+
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
         await provider.send("evm_increaseTime", [86400*14])
