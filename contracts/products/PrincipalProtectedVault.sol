@@ -271,7 +271,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
     uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
-    uint256 _sizeDelta = leverage.mul(amount).mul(1e30).div(_vaultTokenPrice).mul(1e30).div(vaultTokenBase);
+    uint256 _sizeDelta = leverage.mul(amount).mul(_vaultTokenPrice).div(vaultTokenBase);
     IERC20(vaultToken).safeApprove(gmxRouter, 0);
     IERC20(vaultToken).safeApprove(gmxRouter, amount);
     IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
@@ -285,13 +285,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
-    address collateral = isLong ? underlying : usdc;
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, 0, 0);
       return;
     }
+    address collateral = isLong ? underlying : usdc;
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
-    if (underlying == vaultToken) {
+    if (vaultToken == collateral) {
       IRouter(gmxRouter).decreasePosition(collateral, underlying, 0, size, isLong, address(this), _underlyingPrice);
     } else {
       address[] memory path = new address[](2);
