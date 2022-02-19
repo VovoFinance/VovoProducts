@@ -25,7 +25,7 @@ import "../interfaces/gmx/IVault.sol";
 import "../interfaces/gmx/IRewardTracker.sol";
 
 /**
- * @title Glp
+ * @title GlpVault
  * @dev A vault that receives tokens from users, and then use the token to buy and stake GLP from GMX.
  * Periodically, the vault collects the yield rewards(weth and esGMX).
  * Then uses the weth rewards to open a leverage trade on GMX, and stake esGMX to earn more rewards.
@@ -331,7 +331,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   }
 
   /**
-   * @notice Withdraw from this vault to another vault
+   * @notice Withdraw token from this vault
    * @param shares the number of this vault shares to be burned
    * @param tokenOut the withdraw token
    * @param minOut the minimum amount of tokenOut to withdraw
@@ -354,6 +354,10 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit Withdraw(msg.sender, shares, glpAmount, tokenOut, tokenOutAmount, fee);
   }
 
+  /**
+   * @notice Withdraw glp from this vault
+   * @param shares the number of this vault shares to be burned
+   */
   function withdrawGlp(uint256 shares) external whenNotPaused returns(uint256 withdrawAmount) {
     require(shares > 0, "!shares");
     uint256 glpAmount = balance(false).mul(shares).div(totalSupply()); // use min vault balance for withdraw
