@@ -54,10 +54,6 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   address public constant stakedGlp = address(0x01AF26b74409d10e15b102621EDd29c326ba1c55);
   // glp reward router address
   address public constant rewardRouter = address(0xA906F338CB21815cBc4Bc87ace9e68c87eF8d8F1);
-  // gmx router address
-  address public constant gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
-  // gmx vault address
-  address public constant gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
   // glp fee reward tracker address
   address public constant feeGlpTracker = address(0x4e971a87900b931fF39d1Aad67697F49835400b6);
   // gmx fee reward tracker address
@@ -67,7 +63,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   uint256 public constant DENOMINATOR = 10000;
 
   address public underlying; // underlying token of the leverage position
-  uint256 public withdrawalFee;
+  uint256 public managementFee;
   uint256 public performanceFee;
   uint256 public maxCollateralMultiplier;
   uint256 public cap;
@@ -83,35 +79,35 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   address public admin;
   address public guardian;
   address public rewards;
+  address public gmxPositionManager;
+  address public gmxRouter;
+  address public gmxVault;
   /// mapping(keeperAddress => true/false)
   mapping(address => bool) public keepers;
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
-  event Deposited(address account, uint256 shares, uint256 glpAmount, address tokenIn, uint256 tokenInAmount);
-  event DepositedGlp(address account, uint256 shares, uint256 glpAmount);
+  event Deposited(address depositor, address account, uint256 shares, uint256 glpAmount, address tokenIn, uint256 tokenInAmount);
+  event DepositedGlp(address depositor, address account, uint256 shares, uint256 glpAmount);
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
-  event Poked(uint256 tokenReward, uint256 glpAmount, uint256 minPricePerShare, uint256 maxPricePerShare);
+  event Poked(uint256 tokenReward, uint256 glpAmount, uint256 pricePerShare, uint256 fee);
+  event CollectedRewardByKeeper(address keeper, uint256 tokenReward, uint256 glpAmount);
+  event ClosedTradeByKeeper(address keeper, uint256 earning, uint256 glpAmount);
   event OpenPosition(address underlying, uint256 underlyingPrice, uint256 wethPrice, uint256 sizeDelta, bool isLong, uint256 collateralAmount);
   event ClosePosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice,uint256 sizeDelta, bool isLong, uint256 collateralAmount, uint256 fee);
-  event Withdraw(address account, uint256 shares, uint256 glpAmount, address tokenOut, uint256 tokenOutAmount, uint256 fee);
-  event WithdrawGlp(address account, uint256 shares, uint256 glpAmount, uint256 fee);
+  event Withdraw(address account, uint256 shares, uint256 glpAmount, address tokenOut, uint256 tokenOutAmount);
+  event WithdrawGlp(address account, uint256 shares, uint256 glpAmount);
   event WithdrawToVault(address owner, uint256 shares, uint256 glpAmount, address vault, uint256 receivedShares);
   event GovernanceSet(address governor);
   event AdminSet(address admin);
   event GuardianSet(address guardian);
   event FeeSet(uint256 performanceFee, uint256 withdrawalFee);
-  event PerformanceFeeSet(uint256 performanceFee);
-  event WithdrawalFeeSet(uint256 withdrawalFee);
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
-  event RewardsSet(address rewards);
+  event GmxContractsSet(address gmxPositionManager, address gmxRouter, address gmxVault);
   event SlipSet(uint256 slip);
   event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
-  event IsKeeperOnlySet(bool isKeeperOnly);
-  event DepositEnabled(bool isDepositEnabled);
-  event CapSet(uint256 cap);
-  event PokeIntervalSet(uint256 pokeInterval);
+  event ParametersSet(bool isDepositEnabled, uint256 cap, uint256 pokeInterval, bool isKeeperOnly, address rewards);
   event KeeperAdded(address keeper);
   event KeeperRemoved(address keeper);
   event VaultRegistered(address fromVault, address toVault);
@@ -142,10 +138,13 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     governor = msg.sender;
     admin = msg.sender;
     guardian = msg.sender;
+    gmxPositionManager = address(0x98a00666CfCb2BA5A405415C2BF6547C63bf5491);
+    gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
+    gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
     keepers[msg.sender] = true;
     isKeeperOnly = true;
     isDepositEnabled = true;
-    withdrawalFee = 20;
+    managementFee = 200;
     performanceFee = 1000;
     maxCollateralMultiplier = leverage;
   }
@@ -164,14 +163,26 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     return glpBalance;
   }
 
+  /**
+   * @notice Deposit token to this vault for and receive shares.
+   * @param tokenIn is the address of token deposited
+   * @param tokenInAmount is the amount of token deposited
+   * @param minGlp is the minimum amount of GLP to be minted
+   * @return number of shares received
+   */
+  function deposit(address tokenIn, uint256 tokenInAmount, uint256 minGlp) external payable returns(uint256) {
+    return depositFor(tokenIn, tokenInAmount, minGlp, msg.sender);
+  }
 
   /**
    * @notice Deposit token to this vault for an account. The vault mints shares to the account.
    * @param tokenIn is the address of token deposited
    * @param tokenInAmount is the amount of token deposited
    * @param minGlp is the minimum amount of GLP to be minted
+   * @param account is the account to deposit for
+   * @return number of shares minted to account
    */
-  function deposit(address tokenIn, uint256 tokenInAmount, uint256 minGlp) public whenNotPaused payable nonReentrant returns(uint256) {
+  function depositFor(address tokenIn, uint256 tokenInAmount, uint256 minGlp, address account) public whenNotPaused payable nonReentrant returns(uint256) {
     uint256 _pool = balance(true); // use max vault balance for deposit
     uint256 _before = IERC20(tokenIn).uniBalanceOf(address(this));
     IERC20(tokenIn).uniTransferFromSenderToThis(tokenInAmount);
@@ -182,9 +193,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     if (IERC20(tokenIn).isETH()) {
       glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlpETH{value: msg.value}(0, minGlp);
     } else {
-      IERC20(tokenIn).safeApprove(glpManager, 0);
-      IERC20(tokenIn).safeApprove(glpManager, tokenInAmount);
-      glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlp(tokenIn, tokenInAmount, 0, minGlp);
+      glpAmount = mintAndStakeGlp(tokenIn, tokenInAmount, minGlp);
     }
     require(isDepositEnabled && _pool.add(glpAmount) < cap, "!deposit");
     uint256 shares = 0;
@@ -194,16 +203,26 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
       shares = (glpAmount.mul(totalSupply())).div(_pool);
     }
     require(shares > 0, "!shares");
-    _mint(msg.sender, shares);
-    emit Deposited(msg.sender, shares, glpAmount, tokenIn, tokenInAmount);
+    _mint(account, shares);
+    emit Deposited(msg.sender, account, shares, glpAmount, tokenIn, tokenInAmount);
     return shares;
+  }
+
+  /**
+   * @notice Deposit GLP to this vault and receive shares.
+   * @param glpAmount is the amount of GLP deposited
+   */
+  function depositGlp(uint256 glpAmount) external returns(uint256) {
+    return depositGlpFor(glpAmount, msg.sender);
   }
 
   /**
    * @notice Deposit GLP to this vault for an account. The vault mints shares to the account.
    * @param glpAmount is the amount of GLP deposited
+   * @param account is the account to deposit for
+   * @return number of shares minted to account
    */
-  function depositGlp(uint256 glpAmount) public whenNotPaused nonReentrant {
+  function depositGlpFor(uint256 glpAmount, address account) public whenNotPaused nonReentrant returns(uint256) {
     uint256 _pool = balance(true);// use max vault balance for deposit
     require(isDepositEnabled && _pool.add(glpAmount) < cap, "!deposit");
     IStakedGlp(stakedGlp).transferFrom(msg.sender, address(this), glpAmount);
@@ -214,8 +233,9 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
       shares = (glpAmount.mul(totalSupply())).div(_pool);
     }
     require(shares > 0, "!shares");
-    _mint(msg.sender, shares);
-    emit DepositedGlp(msg.sender, shares, glpAmount);
+    _mint(account, shares);
+    emit DepositedGlp(msg.sender, account, shares, glpAmount);
+    return shares;
   }
 
 
@@ -226,6 +246,10 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   function poke() external whenNotPaused nonReentrant {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime + pokeInterval < block.timestamp, "!poke time");
+    // collect management fee in glp first to avoid the glp cooldown duration for transfer after the mintAndStakeGlp below
+    uint256 fee = balance(false).mul(managementFee).div(FEE_DENOMINATOR).mul(block.timestamp.sub(lastPokeTime)).div(86400*365);
+    IStakedGlp(stakedGlp).transfer(rewards, fee);
+
     uint256 tokenReward = collectReward();
     closeTrade();
     if (tokenReward > 0) {
@@ -235,12 +259,22 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     uint256 glpAmount = 0;
     uint256 wethBalance = IERC20(weth).balanceOf(address(this));
     if (wethBalance > 0) {
-      IERC20(weth).safeApprove(glpManager, 0);
-      IERC20(weth).safeApprove(glpManager, wethBalance);
-      glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlp(weth, wethBalance, 0, 0);
+      mintAndStakeGlp(weth, wethBalance, 0);
     }
     lastPokeTime = block.timestamp;
-    emit Poked(tokenReward, glpAmount, getPricePerShare(false), getPricePerShare(true));
+    emit Poked(tokenReward, glpAmount, getPricePerShare(false), fee);
+  }
+
+  /**
+   * @notice Only can be called by keepers in case the poke() does not work
+   *         Claim esGMX, multiplier points and weth from the rewardRouter and stake all of them
+   * @return glpAmount the amount of glp staked from weth rewards
+   */
+  function collectRewardByKeeper() external returns(uint256 glpAmount) {
+    require(keepers[msg.sender], "!keepers");
+    uint256 tokenReward = collectReward();
+    glpAmount = mintAndStakeGlp(weth, tokenReward, 0);
+    emit CollectedRewardByKeeper(msg.sender, tokenReward, glpAmount);
   }
 
   /**
@@ -270,12 +304,28 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
       _path[1] = collateral;
     }
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
-    uint256 _wethPrice = isLong ? IVault(gmxVault).getMinPrice(weth) : IVault(gmxVault).getMaxPrice(weth);
+    uint256 _wethPrice = IVault(gmxVault).getMinPrice(weth);
     uint256 _sizeDelta = leverage.mul(amount).mul(_wethPrice).div(1e18);
     IERC20(underlying).safeApprove(gmxRouter, 0);
     IERC20(underlying).safeApprove(gmxRouter, amount);
-    IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
+    IRouter(gmxRouter).approvePlugin(gmxPositionManager);
+    IRouter(gmxPositionManager).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
     emit OpenPosition(underlying, _underlyingPrice, _wethPrice, _sizeDelta, isLong, amount);
+  }
+
+  /**
+   * @notice Only can be called by keepers to close the position and stake weth profit in case the poke() does not work
+   * @return glpAmount the amount of glp minted and staked
+   */
+  function closeTradeByKeeper() external returns(uint256 glpAmount){
+    require(keepers[msg.sender], "!keepers");
+    closeTrade();
+    uint256 wethBalance = IERC20(weth).balanceOf(address(this));
+    glpAmount = 0;
+    if (wethBalance > 0) {
+      glpAmount = mintAndStakeGlp(weth, wethBalance, 0);
+    }
+    emit ClosedTradeByKeeper(msg.sender, wethBalance, glpAmount);
   }
 
   /**
@@ -284,7 +334,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   function closeTrade() private {
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
-    uint256 _wethPrice = isLong ? IVault(gmxVault).getMinPrice(weth) : IVault(gmxVault).getMaxPrice(weth);
+    uint256 _wethPrice = IVault(gmxVault).getMinPrice(weth);
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _wethPrice, size, isLong, 0, 0);
       return;
@@ -310,6 +360,12 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit ClosePosition(underlying, _underlyingPrice, _wethPrice, size, isLong, _tradeProfit, _fee);
   }
 
+  function mintAndStakeGlp(address tokenIn, uint256 tokenInAmount, uint256 minGlp) private returns(uint256 glpAmount) {
+    IERC20(tokenIn).safeApprove(glpManager, 0);
+    IERC20(tokenIn).safeApprove(glpManager, tokenInAmount);
+    glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlp(tokenIn, tokenInAmount, 0, minGlp);
+  }
+
   /**
    * @notice Withdraw from this vault to another vault
    * @param shares the number of this vault shares to be burned
@@ -326,7 +382,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     uint256 receivedShares = IERC20(vault).balanceOf(address(this));
     IERC20(vault).safeTransfer(msg.sender, receivedShares);
 
-    emit WithdrawGlp(msg.sender, shares, glpAmount, 0);
+    emit WithdrawGlp(msg.sender, shares, glpAmount);
     emit WithdrawToVault(msg.sender, shares, glpAmount, vault, receivedShares);
   }
 
@@ -335,38 +391,33 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @param shares the number of this vault shares to be burned
    * @param tokenOut the withdraw token
    * @param minOut the minimum amount of tokenOut to withdraw
+   * @return tokenOutAmount the amount of tokenOut that is withdrawn
    */
-  function withdraw(address tokenOut, uint256 shares, uint256 minOut) external whenNotPaused returns(uint256 withdrawAmount) {
+  function withdraw(address tokenOut, uint256 shares, uint256 minOut) external whenNotPaused returns(uint256 tokenOutAmount) {
     require(shares > 0, "!shares");
     uint256 glpAmount = (balance(false).mul(shares)).div(totalSupply()); // use min vault balance for withdraw
     _burn(msg.sender, shares);
 
-    uint256 tokenOutAmount = 0;
     if (IERC20(tokenOut).isETH()) {
       tokenOutAmount = IRewardRouter(rewardRouter).unstakeAndRedeemGlpETH(glpAmount, minOut, address(this));
     } else {
       tokenOutAmount = IRewardRouter(rewardRouter).unstakeAndRedeemGlp(tokenOut, glpAmount, minOut, address(this));
     }
-    uint256 fee = tokenOutAmount.mul(withdrawalFee).div(FEE_DENOMINATOR);
-    withdrawAmount = tokenOutAmount.sub(fee);
-    IERC20(tokenOut).uniTransfer(msg.sender, withdrawAmount);
-    IERC20(tokenOut).uniTransfer(rewards, fee);
-    emit Withdraw(msg.sender, shares, glpAmount, tokenOut, tokenOutAmount, fee);
+    IERC20(tokenOut).uniTransfer(msg.sender, tokenOutAmount);
+    emit Withdraw(msg.sender, shares, glpAmount, tokenOut, tokenOutAmount);
   }
 
   /**
    * @notice Withdraw glp from this vault
    * @param shares the number of this vault shares to be burned
+   * @return glpAmount amount of glp that is withdrawn
    */
-  function withdrawGlp(uint256 shares) external whenNotPaused returns(uint256 withdrawAmount) {
+  function withdrawGlp(uint256 shares) external whenNotPaused returns(uint256 glpAmount) {
     require(shares > 0, "!shares");
-    uint256 glpAmount = balance(false).mul(shares).div(totalSupply()); // use min vault balance for withdraw
+    glpAmount = balance(false).mul(shares).div(totalSupply()); // use min vault balance for withdraw
     _burn(msg.sender, shares);
-    uint256 fee = glpAmount.mul(withdrawalFee).div(FEE_DENOMINATOR);
-    withdrawAmount = glpAmount.sub(fee);
-    IStakedGlp(stakedGlp).transfer(msg.sender, withdrawAmount);
-    IStakedGlp(stakedGlp).transfer(rewards, fee);
-    emit WithdrawGlp(msg.sender, shares, glpAmount, fee);
+    IStakedGlp(stakedGlp).transfer(msg.sender, glpAmount);
+    emit WithdrawGlp(msg.sender, shares, glpAmount);
   }
 
   receive() external payable {}
@@ -428,12 +479,12 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit GuardianSet(guardian);
   }
 
-  function setFees(uint256 _performanceFee, uint256 _withdrawalFee) external onlyGovernor {
-    // ensure performanceFee is smaller than 50% and withdraw fee is smaller than 5%
-    require(_performanceFee < 5000 && _withdrawalFee < 500, "!too-much");
+  function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyGovernor {
+    // ensure performanceFee is smaller than 50% and management fee is smaller than 5%
+    require(_performanceFee < 5000 && _managementFee < 500, "!too-much");
     performanceFee = _performanceFee;
-    withdrawalFee = _withdrawalFee;
-    emit FeeSet(performanceFee, withdrawalFee);
+    managementFee = _managementFee;
+    emit FeeSet(performanceFee, managementFee);
   }
 
   function setLeverage(uint256 _leverage) external onlyGovernor {
@@ -448,9 +499,11 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit isLongSet(isLong);
   }
 
-  function setRewards(address _rewards) external onlyGovernor {
-    rewards = _rewards;
-    emit RewardsSet(rewards);
+  function setGmxContracts(address _gmxPositionManager, address _gmxRouter, address _gmxVault) external onlyGovernor {
+    gmxPositionManager = _gmxPositionManager;
+    gmxRouter = _gmxRouter;
+    gmxVault = _gmxVault;
+    emit GmxContractsSet(gmxPositionManager, gmxRouter, gmxVault);
   }
 
   function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) external onlyGovernor {
@@ -458,21 +511,13 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     maxCollateralMultiplier = _maxCollateralMultiplier;
   }
 
-  function setIsKeeperOnly(bool _isKeeperOnly) external onlyGovernor {
-    isKeeperOnly = _isKeeperOnly;
-    emit IsKeeperOnlySet(_isKeeperOnly);
-  }
-
-  function setDepositEnabledAndCap(bool _flag, uint256 _cap) external onlyGovernor {
-    isDepositEnabled = _flag;
+  function setParameters(bool _isDepositEnabled, uint256 _cap, uint256 _pokeInterval, bool _isKeeperOnly, address _rewards) external onlyGovernor {
+    isDepositEnabled = _isDepositEnabled;
     cap = _cap;
-    emit DepositEnabled(isDepositEnabled);
-    emit CapSet(cap);
-  }
-
-  function setPokeInterval(uint256 _pokeInterval) external onlyGovernor {
     pokeInterval = _pokeInterval;
-    emit PokeIntervalSet(pokeInterval);
+    isKeeperOnly = _isKeeperOnly;
+    rewards = _rewards;
+    emit ParametersSet(isDepositEnabled, cap, pokeInterval, isKeeperOnly, rewards);
   }
 
   // ===== Permissioned Actions: Admin =====

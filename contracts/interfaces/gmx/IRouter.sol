@@ -8,4 +8,5 @@ interface IRouter {
     function decreasePositionETH(address _collateralToken, address _indexToken, uint256 _collateralDelta, uint256 _sizeDelta, bool _isLong, address payable _receiver, uint256 _price) external;
     function decreasePositionAndSwap(address[] memory _path, address _indexToken, uint256 _collateralDelta, uint256 _sizeDelta, bool _isLong, address _receiver, uint256 _price, uint256 _minOut) external;
     function swap(address[] memory _path, uint256 _amountIn, uint256 _minOut, address _receiver) external;
+    function approvePlugin(address _plugin) external;
 }
