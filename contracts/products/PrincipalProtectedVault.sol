@@ -34,10 +34,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   address public constant weth = address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
   // crv token address
   address public constant crv = address(0x11cDb42B0EB46D95f990BeDD4695A6e3fA034978);
-  // gmx router address
-  address public constant gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
-  // gmx vault address
-  address public constant gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
   // sushiswap address
   address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
 
@@ -48,7 +44,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   address public underlying; // underlying token of the leverage position
   address public lpToken;
   address public gauge;
-  uint256 public withdrawalFee;
+  uint256 public managementFee;
   uint256 public performanceFee;
   uint256 public slip;
   uint256 public maxCollateralMultiplier;
@@ -68,18 +64,21 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   address public guardian;
   address public rewards;
   address public dex;
+  address public gmxPositionManager;
+  address public gmxRouter;
+  address public gmxVault;
   /// mapping(keeperAddress => true/false)
   mapping(address => bool) public keepers;
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
-  event Deposit(address account, uint256 amount, uint256 shares);
+  event Deposit(address depositor, address account, uint256 amount, uint256 shares);
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event GaugeDeposited(uint256 lpDeposited);
-  event Poked(uint256 minPricePerShare, uint256 maxPricePerShare);
+  event Poked(uint256 pricePerShare, uint256 feeShare);
   event OpenPosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice, uint256 sizeDelta, bool isLong, uint256 collateralAmountVaultToken);
   event ClosePosition(address underlying, uint256 underlyingPrice, uint256 vaultTokenPrice,uint256 sizeDelta, bool isLong, uint256 collateralAmountVaultToken, uint256 fee);
-  event Withdraw(address account, uint256 amount, uint256 shares, uint256 fee);
+  event Withdraw(address account, uint256 amount, uint256 shares);
   event WithdrawToVault(address owner, uint256 shares, address vault, uint256 receivedShares);
   event GovernanceSet(address governor);
   event AdminSet(address admin);
@@ -88,12 +87,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
   event RewardsSet(address rewards);
-  event SlipSet(uint256 slip);
+  event GmxContractsSet(address gmxPositionManager, address gmxRouter, address gmxVault);
   event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
-  event IsKeeperOnlySet(bool isKeeperOnly);
-  event DepositEnabled(bool isDepositEnabled);
-  event CapSet(uint256 cap);
-  event PokeIntervalSet(uint256 pokeInterval);
+  event ParametersSet(bool isDepositEnabled, uint256 cap, uint256 pokeInterval, bool isKeeperOnly);
   event KeeperAdded(address keeper);
   event KeeperRemoved(address keeper);
   event VaultRegistered(address fromVault, address toVault);
@@ -133,10 +129,13 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     admin = msg.sender;
     guardian = msg.sender;
     dex = sushiswap;
+    gmxPositionManager = address(0x98a00666CfCb2BA5A405415C2BF6547C63bf5491);
+    gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
+    gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
     keepers[msg.sender] = true;
     isKeeperOnly = true;
     isDepositEnabled = true;
-    withdrawalFee = 30;
+    managementFee = 200;
     performanceFee = 1000;
     slip = 30;
     maxCollateralMultiplier = leverage;
@@ -185,7 +184,16 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    * @notice Deposit token to this vault. The vault mints shares to the depositor.
    * @param amount is the amount of token deposited
    */
-  function deposit(uint256 amount) public whenNotPaused nonReentrant {
+  function deposit(uint256 amount) external {
+      depositFor(amount, msg.sender);
+  }
+
+  /**
+   * @notice Deposit token to this vault. The vault mints shares to the account.
+   * @param amount is the amount of token deposited
+   * @param account is the account to deposit for
+   */
+  function depositFor(uint256 amount, address account) public whenNotPaused nonReentrant {
     uint256 _pool = balance(true); // use max vault balance for deposit
     require(isDepositEnabled && _pool.add(amount) < cap, "!deposit");
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
@@ -199,8 +207,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
       shares = (amount.mul(totalSupply())).div(_pool);
     }
     require(shares > 0, "!shares");
-    _mint(msg.sender, shares);
-    emit Deposit(msg.sender, amount, shares);
+    _mint(account, shares);
+    emit Deposit(msg.sender, account, amount, shares);
   }
 
 
@@ -211,6 +219,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   function poke() external whenNotPaused nonReentrant {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime.add(pokeInterval) < block.timestamp, "!poke time");
+    // collect management fee by minting shares to reward recipient
+    uint256 feeShare = totalSupply().mul(managementFee).div(FEE_DENOMINATOR).mul(block.timestamp.sub(lastPokeTime)).div(86400*365);
+    _mint(rewards, feeShare);
     currentPokeInterval = block.timestamp.sub(lastPokeTime);
     uint256 tokenReward = 0;
     if (Gauge(gauge).balanceOf(address(this)) > 0) {
@@ -223,7 +234,17 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     currentTokenReward = tokenReward;
     earn();
     lastPokeTime = block.timestamp;
-    emit Poked(getPricePerShare(false), getPricePerShare(true));
+    emit Poked(getPricePerShare(false), feeShare);
+  }
+
+  /**
+   * @notice Only can be called by keepers in case the poke() does not work
+   *         Claim rewards from the gauge and swap the rewards to the vault token
+   * @return tokenReward the amount of vault token swapped from farm reward
+   */
+  function collectRewardByKeeper() external returns(uint256 tokenReward) {
+    require(keepers[msg.sender], "!keepers");
+    tokenReward = collectReward();
   }
 
   /**
@@ -270,12 +291,21 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
       _path[1] = collateral;
     }
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
-    uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
+    uint256 _vaultTokenPrice = IVault(gmxVault).getMinPrice(vaultToken);
     uint256 _sizeDelta = leverage.mul(amount).mul(_vaultTokenPrice).div(vaultTokenBase);
     IERC20(vaultToken).safeApprove(gmxRouter, 0);
     IERC20(vaultToken).safeApprove(gmxRouter, amount);
-    IRouter(gmxRouter).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
+    IRouter(gmxRouter).approvePlugin(gmxPositionManager);
+    IRouter(gmxPositionManager).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
     emit OpenPosition(underlying, _underlyingPrice, _vaultTokenPrice, _sizeDelta, isLong, amount);
+  }
+
+  /**
+   * @notice Only can be called by keepers to close the position in case the poke() does not work
+   */
+  function closeTradeByKeeper() external {
+    require(keepers[msg.sender], "!keepers");
+    closeTrade();
   }
 
   /**
@@ -284,7 +314,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   function closeTrade() private {
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
-    uint256 _vaultTokenPrice = isLong ? IVault(gmxVault).getMinPrice(vaultToken) : IVault(gmxVault).getMaxPrice(vaultToken);
+    uint256 _vaultTokenPrice = IVault(gmxVault).getMinPrice(vaultToken);
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, 0, 0);
       return;
@@ -335,34 +365,28 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     uint256 receivedShares = IERC20(vault).balanceOf(address(this));
     IERC20(vault).safeTransfer(msg.sender, receivedShares);
 
-    emit Withdraw(msg.sender, withdrawAmount, shares, 0);
+    emit Withdraw(msg.sender, withdrawAmount, shares);
     emit WithdrawToVault(msg.sender, shares, vault, receivedShares);
   }
 
   function _withdraw(uint256 shares, bool shouldChargeFee) private returns(uint256 withdrawAmount) {
     require(shares > 0, "!shares");
-    uint256 r = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for deposit
+    withdrawAmount = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for deposit
     _burn(msg.sender, shares);
 
     uint256 b = IERC20(vaultToken).balanceOf(address(this));
-    if (b < r) {
+    if (b < withdrawAmount) {
       uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
       // amount of LP tokens to withdraw
-      uint256 lpAmount = (r.sub(b)).mul(1e18).div(vaultTokenBase).mul(1e18).div(lpPrice);
+      uint256 lpAmount = (withdrawAmount.sub(b)).mul(1e18).div(vaultTokenBase).mul(1e18).div(lpPrice);
       _withdrawSome(lpAmount);
       uint256 _after = IERC20(vaultToken).balanceOf(address(this));
       uint256 _diff = _after.sub(b);
-      if (_diff < r.sub(b)) {
-        r = b.add(_diff);
+      if (_diff < withdrawAmount.sub(b)) {
+          withdrawAmount = b.add(_diff);
       }
     }
-    uint256 fee = 0;
-    if (shouldChargeFee) {
-      fee = r.mul(withdrawalFee).div(FEE_DENOMINATOR);
-      IERC20(vaultToken).safeTransfer(rewards, fee);
-    }
-    withdrawAmount = r.sub(fee);
-    emit Withdraw(msg.sender, r, shares, fee);
+    emit Withdraw(msg.sender, withdrawAmount, shares);
   }
 
   /**
@@ -455,8 +479,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     // ensure performanceFee is smaller than 50% and withdraw fee is smaller than 5%
     require(_performanceFee < 5000 && _withdrawalFee < 500, "!too-much");
     performanceFee = _performanceFee;
-    withdrawalFee = _withdrawalFee;
-    emit FeeSet(performanceFee, withdrawalFee);
+    managementFee = _withdrawalFee;
+    emit FeeSet(performanceFee, managementFee);
   }
 
   function setLeverage(uint256 _leverage) external onlyGovernor {
@@ -476,9 +500,15 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit RewardsSet(rewards);
   }
 
+  function setGmxContracts(address _gmxPositionManager, address _gmxRouter, address _gmxVault) external onlyGovernor {
+    gmxPositionManager = _gmxPositionManager;
+    gmxRouter = _gmxRouter;
+    gmxVault = _gmxVault;
+    emit GmxContractsSet(gmxPositionManager, gmxRouter, gmxVault);
+  }
+
   function setSlip(uint256 _slip) external onlyGovernor {
     slip = _slip;
-    emit SlipSet(slip);
   }
 
   function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) external onlyGovernor {
@@ -487,21 +517,12 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit MaxCollateralMultiplierSet(maxCollateralMultiplier);
   }
 
-  function setIsKeeperOnly(bool _isKeeperOnly) external onlyGovernor {
-    isKeeperOnly = _isKeeperOnly;
-    emit IsKeeperOnlySet(_isKeeperOnly);
-  }
-
-  function setDepositEnabledAndCap(bool _flag, uint256 _cap) external onlyGovernor {
+  function setParameters(bool _flag, uint256 _cap, uint256 _pokeInterval, bool _isKeeperOnly) external onlyGovernor {
     isDepositEnabled = _flag;
     cap = _cap;
-    emit DepositEnabled(isDepositEnabled);
-    emit CapSet(cap);
-  }
-
-  function setPokeInterval(uint256 _pokeInterval) external onlyGovernor {
     pokeInterval = _pokeInterval;
-    emit PokeIntervalSet(pokeInterval);
+    isKeeperOnly = _isKeeperOnly;
+    emit ParametersSet(isDepositEnabled, cap, pokeInterval, isKeeperOnly);
   }
 
   // ===== Permissioned Actions: Admin =====

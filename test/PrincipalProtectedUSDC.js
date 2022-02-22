@@ -93,6 +93,10 @@ describe("PPV", function () {
         gaugeContract = new ethers.Contract(gauge, gaugeABI, signer);
         _2poolContract = new ethers.Contract(_2pool, _2poolABI, signer);
         gmxVaultContract = new ethers.Contract(gmxVault, gmxVaultABI, signer);
+
+        await ppv.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        await ppv2.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        await ppv.setRewards(rewards.address);
     })
 
     it("deposit", async() => {
@@ -196,7 +200,7 @@ describe("PPV", function () {
         await expect(ppv.connect(admin).setFees("3000", "100")).to.be.revertedWith("!governor");
         await ppv.connect(governor).setFees("3000", "100");
         expect((await ppv.performanceFee()).toString()).to.be.equal("3000");
-        expect((await ppv.withdrawalFee()).toString()).to.be.equal("100");
+        expect((await ppv.managementFee()).toString()).to.be.equal("100");
     })
 
     it("set isLong", async() => {
@@ -217,18 +221,15 @@ describe("PPV", function () {
         expect((await ppv.slip()).toString()).to.be.equal("5000");
     })
 
-    it("set DepositEnabled", async() => {
-        await expect(ppv.connect(admin).setDepositEnabledAndCap(false, "1000000000000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setDepositEnabledAndCap(false, "1000000000000");
+    it("set parameters", async() => {
+        await expect(ppv.connect(admin).setParameters(false, "1000000000000", "100000", true)).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setParameters(false, "1000000000000", "100000", true);
         expect((await ppv.isDepositEnabled()).toString()).to.be.equal("false");
         expect((await ppv.cap()).toString()).to.be.equal("1000000000000");
+        expect((await ppv.pokeInterval()).toString()).to.be.equal("100000");
+        expect((await ppv.isKeeperOnly()).toString()).to.be.equal("true");
     })
 
-    it("set poke interval", async() => {
-        await expect(ppv.connect(admin).setPokeInterval("100000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setPokeInterval("100000");
-        expect((await ppv.pokeInterval()).toString()).to.be.equal("100000");
-    })
 
     it("pause contract", async() => {
         await ppv.connect(governor).setGuardian(guardian.address);
