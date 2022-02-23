@@ -247,7 +247,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime + pokeInterval < block.timestamp, "!poke time");
     // collect management fee in glp first to avoid the glp cooldown duration for transfer after the mintAndStakeGlp below
-    uint256 fee = balance(false).mul(managementFee).div(FEE_DENOMINATOR).mul(block.timestamp.sub(lastPokeTime)).div(86400*365);
+    uint256 fee = balance(false).mul(managementFee).mul(block.timestamp.sub(lastPokeTime)).div(86400*365).div(FEE_DENOMINATOR);
     IStakedGlp(stakedGlp).transfer(rewards, fee);
 
     uint256 tokenReward = collectReward();
