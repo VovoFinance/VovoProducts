@@ -220,7 +220,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     require(lastPokeTime.add(pokeInterval) < block.timestamp, "!poke time");
     // collect management fee by minting shares to reward recipient
-    uint256 feeShare = totalSupply().mul(managementFee).div(FEE_DENOMINATOR).mul(block.timestamp.sub(lastPokeTime)).div(86400*365);
+    uint256 feeShare = totalSupply().mul(managementFee).mul(block.timestamp.sub(lastPokeTime)).div(86400*365).div(FEE_DENOMINATOR);
     _mint(rewards, feeShare);
     currentPokeInterval = block.timestamp.sub(lastPokeTime);
     uint256 tokenReward = 0;
