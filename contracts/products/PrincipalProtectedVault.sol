@@ -475,11 +475,11 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit GuardianSet(guardian);
   }
 
-  function setFees(uint256 _performanceFee, uint256 _withdrawalFee) external onlyGovernor {
-    // ensure performanceFee is smaller than 50% and withdraw fee is smaller than 5%
+  function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyGovernor {
+    // ensure performanceFee is smaller than 50% and management fee is smaller than 5%
     require(_performanceFee < 5000 && _withdrawalFee < 500, "!too-much");
     performanceFee = _performanceFee;
-    managementFee = _withdrawalFee;
+    managementFee = _managementFee;
     emit FeeSet(performanceFee, managementFee);
   }
 
