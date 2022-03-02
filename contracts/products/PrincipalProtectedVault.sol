@@ -312,14 +312,14 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    * @notice Close leverage position at GMX
    */
   function closeTrade() private {
-    (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    address collateral = isLong ? underlying : usdc;
+    (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), collateral, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     uint256 _vaultTokenPrice = IVault(gmxVault).getMinPrice(vaultToken);
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _vaultTokenPrice, size, isLong, 0, 0);
       return;
     }
-    address collateral = isLong ? underlying : usdc;
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
     if (vaultToken == collateral) {
       IRouter(gmxRouter).decreasePosition(collateral, underlying, 0, size, isLong, address(this), _underlyingPrice);
@@ -430,7 +430,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    * @notice get the active leverage position value in vaultToken
    */
   function getActivePositionValue() public view returns (uint256) {
-    (uint256 size, uint256 collateral,,uint256 entryFundingRate,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    address collateral = isLong ? underlying : usdc;
+    (uint256 size, uint256 collateralAmount,,uint256 entryFundingRate,,,,) = IVault(gmxVault).getPosition(address(this), collateral, underlying, isLong);
     if (size == 0) {
       return 0;
     }
@@ -438,7 +439,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     uint256 feeUsd = IVault(gmxVault).getPositionFee(size);
     uint256 fundingFee = IVault(gmxVault).getFundingFee(underlying, size, entryFundingRate);
     feeUsd = feeUsd.add(fundingFee);
-    uint256 positionValueUsd = hasProfit ? collateral.add(delta).sub(feeUsd) : collateral.sub(delta).sub(feeUsd);
+    uint256 positionValueUsd = hasProfit ? collateralAmount.add(delta).sub(feeUsd) : collateralAmount.sub(delta).sub(feeUsd);
     uint256 positionValue = IVault(gmxVault).usdToTokenMin(vaultToken, positionValueUsd);
     // Cap the positionValue to avoid the oracle manipulation
     if (positionValue > currentTokenReward.mul(maxCollateralMultiplier)) {
@@ -477,7 +478,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
 
   function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyGovernor {
     // ensure performanceFee is smaller than 50% and management fee is smaller than 5%
-    require(_performanceFee < 5000 && _withdrawalFee < 500, "!too-much");
+    require(_performanceFee < 5000 && _managementFee < 500, "!too-much");
     performanceFee = _performanceFee;
     managementFee = _managementFee;
     emit FeeSet(performanceFee, managementFee);
