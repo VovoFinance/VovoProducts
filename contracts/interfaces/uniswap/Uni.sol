@@ -17,4 +17,6 @@ interface Uni {
       view
       virtual
       returns (uint[] memory amounts);
+
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 poolFee1, uint256 poolFee2) external;
 }

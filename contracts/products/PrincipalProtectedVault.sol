@@ -37,6 +37,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   // sushiswap address
   address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
 
+  uint256 public constant poolFee1 = 3000;
+  uint256 public constant poolFee2 = 500;
+
   uint256 public constant FEE_DENOMINATOR = 10000;
   uint256 public constant DENOMINATOR = 10000;
 
@@ -108,7 +111,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     bool _isLong,
     uint256 _cap,
     uint256 _vaultTokenBase,
-    uint256 _underlyingBase
+    uint256 _underlyingBase,
+    address _dex
   ) public initializer {
     __ERC20_init(_vaultName, _vaultSymbol);
     _setupDecimals(_vaultDecimal);
@@ -123,12 +127,12 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     cap = _cap;
     vaultTokenBase = _vaultTokenBase;
     underlyingBase = _underlyingBase;
+    dex = _dex;
     lastPokeTime = block.timestamp;
     pokeInterval = 7 days;
     governor = msg.sender;
     admin = msg.sender;
     guardian = msg.sender;
-    dex = sushiswap;
     gmxPositionManager = address(0x98a00666CfCb2BA5A405415C2BF6547C63bf5491);
     gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
     gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
@@ -256,20 +260,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     Gauge(gauge).claim_rewards(address(this));
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
-      IERC20(crv).safeApprove(dex, 0);
-      IERC20(crv).safeApprove(dex, _crv);
-      address[] memory path;
-      if (vaultToken == weth) {
-        path = new address[](2);
-        path[0] = crv;
-        path[1] = weth;
-      } else {
-        path = new address[](3);
-        path[0] = crv;
-        path[1] = weth;
-        path[2] = vaultToken;
-      }
-      Uni(dex).swapExactTokensForTokens(_crv, 0, path, address(this), block.timestamp.add(1800))[path.length - 1];
+      IERC20(crv).transfer(dex, _crv);
+      Uni(dex).swap(crv, vaultToken, _crv, poolFee1, poolFee2);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     tokenReward = _after.sub(_before);
@@ -435,11 +427,16 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     if (size == 0) {
       return 0;
     }
-    (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), underlying, underlying, isLong);
+    (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), collateral, underlying, isLong);
     uint256 feeUsd = IVault(gmxVault).getPositionFee(size);
     uint256 fundingFee = IVault(gmxVault).getFundingFee(underlying, size, entryFundingRate);
     feeUsd = feeUsd.add(fundingFee);
-    uint256 positionValueUsd = hasProfit ? collateralAmount.add(delta).sub(feeUsd) : collateralAmount.sub(delta).sub(feeUsd);
+    uint256 positionValueUsd = 0;
+    if (hasProfit){
+      positionValueUsd = collateralAmount.add(delta) > feeUsd ? collateralAmount.add(delta).sub(feeUsd) : 0;
+    } else {
+      positionValueUsd = collateralAmount > delta.add(feeUsd) ? collateralAmount.sub(delta).sub(feeUsd) : 0;
+    }
     uint256 positionValue = IVault(gmxVault).usdToTokenMin(vaultToken, positionValueUsd);
     // Cap the positionValue to avoid the oracle manipulation
     if (positionValue > currentTokenReward.mul(maxCollateralMultiplier)) {

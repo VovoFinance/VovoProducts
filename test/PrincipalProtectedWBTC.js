@@ -36,7 +36,7 @@ function assertAlmostEqual(actual, expected, accuracy = 1000) {
 
 describe("PPV WBTC", function () {
     this.timeout(500000);
-    let addrs = [], owner, governor, admin, keeper, rewards, ppv, ppv2, usdcContract, wbtcContract, sushiContract, lpContract, gaugeContract, gmxVaultContract;
+    let addrs = [], owner, governor, admin, keeper, rewards, ppv, ppv2, usdcContract, wbtcContract, sushiContract, lpContract, gaugeContract, gmxVaultContract, univ3Swapper;
     const depositAmount = BigNumber.from("1000000000"); // 10 btc
     before(async () => {
         addrs = provider.getWallets();
@@ -45,6 +45,10 @@ describe("PPV WBTC", function () {
         admin = addrs[2];
         rewards = addrs[3];
         keeper = addrs[4];
+
+        const univ3SwapperContract = await ethers.getContractFactory("Univ3Swapper");
+        univ3Swapper = await univ3SwapperContract.connect(owner).deploy( "0xE592427A0AEce92De3Edee1F18E0157C05861564", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1");
+
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
         ppv = await ppvContract.connect(owner).deploy()
         await ppv.initialize(
@@ -60,7 +64,8 @@ describe("PPV WBTC", function () {
             true, // isLong
             "10000000000", // cap: 100 btc
             "100000000", // vaultToken base: 1e8
-            "1000000000000000000" // underlying base: 1e8
+            "1000000000000000000", // underlying base: 1e8
+            univ3Swapper.address
         )
         ppv2 = await ppvContract.connect(owner).deploy()
         await ppv2.initialize(
@@ -76,7 +81,8 @@ describe("PPV WBTC", function () {
             false, // isLong
             "10000000000", // cap: 100 btc
             "100000000", // vaultToken base: 1e8
-            "1000000000000000000" // underlying base: 1e8
+            "1000000000000000000", // underlying base: 1e8
+            univ3Swapper.address
         )
 
         await network.provider.request({
@@ -103,8 +109,9 @@ describe("PPV WBTC", function () {
         lpContract = new ethers.Contract(_2crv, lpABI, signer);
         gaugeContract = new ethers.Contract(gauge, gaugeABI, signer);
         gmxVaultContract = new ethers.Contract(gmxVault, gmxVaultABI, signer);
-        await ppv.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
-        await ppv2.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        // await ppv.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        // await ppv2.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+
         await ppv.setRewards(rewards.address);
         await ppv2.setRewards(rewards.address);
     })
