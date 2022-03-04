@@ -158,7 +158,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /**
    * @notice Add liquidity to curve and deposit the LP tokens to gauge
    */
-  function earn() whenNotPaused public {
+  function earn() public whenNotPaused {
     require(keepers[msg.sender] || !isKeeperOnly, "!keepers");
     uint256 tokenBalance = IERC20(vaultToken).balanceOf(address(this));
     if (tokenBalance > 0) {
@@ -239,7 +239,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    *         Claim rewards from the gauge and swap the rewards to the vault token
    * @return tokenReward the amount of vault token swapped from farm reward
    */
-  function collectRewardByKeeper() external returns(uint256 tokenReward) {
+  function collectRewardByKeeper() external whenNotPaused nonReentrant returns(uint256 tokenReward) {
     require(keepers[msg.sender], "!keepers");
     tokenReward = collectReward();
   }
@@ -289,7 +289,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /**
    * @notice Only can be called by keepers to close the position in case the poke() does not work
    */
-  function closeTradeByKeeper() nonReentrant external {
+  function closeTradeByKeeper() external whenNotPaused nonReentrant {
     require(keepers[msg.sender], "!keepers");
     closeTrade();
   }
