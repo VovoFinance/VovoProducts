@@ -22,6 +22,7 @@ contract Univ3Swapper {
     }
 
     function swap(address tokenIn, address tokenOut, uint256 amountIn) external {
+        TransferHelper.safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
         TransferHelper.safeApprove(tokenIn, swapRouter, amountIn);
 
         ISwapRouter.ExactInputParams memory params =

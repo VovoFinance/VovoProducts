@@ -253,7 +253,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     Gauge(gauge).claim_rewards(address(this));
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
-      IERC20(crv).transfer(dex, _crv);
+      IERC20(crv).safeApprove(dex, 0);
+      IERC20(crv).safeApprove(dex, _crv);
       Uni(dex).swap(crv, vaultToken, _crv);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
