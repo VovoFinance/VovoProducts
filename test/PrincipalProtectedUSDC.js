@@ -33,7 +33,7 @@ function assertAlmostEqual(actual, expected, accuracy = 1000) {
 
 describe("PPV", function () {
     this.timeout(5000000);
-    let addrs = [], owner, governor, admin, keeper, guardian, rewards, ppv, ppv2, usdcContract, _2crvContract, gaugeContract, _2poolContract, gmxVaultContract, univ3Swapper;
+    let addrs = [], owner, governor, admin, keeper, guardian, rewards, ppv, ppv2, usdcContract, _2crvContract, gaugeContract, _2poolContract, gmxVaultContract, univ3Swapper, gmxTrader;
     const depositAmount = BigNumber.from("1000000000000"); // 1m usdc
     before(async () => {
         addrs = provider.getWallets();
@@ -44,7 +44,7 @@ describe("PPV", function () {
         keeper = addrs[4];
         guardian = addrs[5];
         const univ3SwapperContract = await ethers.getContractFactory("Univ3Swapper");
-        univ3Swapper = await univ3SwapperContract.connect(owner).deploy( "0xE592427A0AEce92De3Edee1F18E0157C05861564", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1");
+        univ3Swapper = await univ3SwapperContract.connect(owner).deploy( "0xE592427A0AEce92De3Edee1F18E0157C05861564", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", 3000, 500);
 
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
         ppv = await ppvContract.connect(owner).deploy()
@@ -147,13 +147,17 @@ describe("PPV", function () {
         console.log("share price1 max", (await ppv.getPricePerShare(true)).toString());
 
         const tx = await ppv.connect(owner).poke();
-        const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
+        const position = await ppv.getActivePositionValue();
+        console.log("active position long", position.toString())
+        // const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         console.log("balance min", (await ppv.balance(false)).toString());
         console.log("balance max", (await ppv.balance(true)).toString())
         expect(await tx).to.emit(ppv, "OpenPosition");
 
         const tx1 = await ppv2.connect(owner).poke();
         expect(await tx1).to.emit(ppv2, "OpenPosition");
+        const position1 = await ppv2.getActivePositionValue();
+        console.log("active position short", position1.toString())
 
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])

@@ -37,9 +37,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   // sushiswap address
   address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
 
-  uint256 public constant poolFee1 = 3000;
-  uint256 public constant poolFee2 = 500;
-
   uint256 public constant FEE_DENOMINATOR = 10000;
   uint256 public constant DENOMINATOR = 10000;
 
@@ -261,7 +258,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
       IERC20(crv).transfer(dex, _crv);
-      Uni(dex).swap(crv, vaultToken, _crv, poolFee1, poolFee2);
+      Uni(dex).swap(crv, vaultToken, _crv);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     tokenReward = _after.sub(_before);
@@ -295,7 +292,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /**
    * @notice Only can be called by keepers to close the position in case the poke() does not work
    */
-  function closeTradeByKeeper() external {
+  function closeTradeByKeeper() nonReentrant external {
     require(keepers[msg.sender], "!keepers");
     closeTrade();
   }
@@ -337,7 +334,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    * @param shares is the shares of the sender to withdraw
    */
   function withdraw(uint256 shares) external whenNotPaused nonReentrant {
-    uint256 withdrawAmount = _withdraw(shares, true);
+    uint256 withdrawAmount = _withdraw(shares);
     IERC20(vaultToken).safeTransfer(msg.sender, withdrawAmount);
   }
 
@@ -351,7 +348,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     require(withdrawMapping[address(this)][vault], "Withdraw to vault not allowed");
 
     // vault to vault transfer does not charge any withdraw fee
-    uint256 withdrawAmount = _withdraw(shares, false);
+    uint256 withdrawAmount = _withdraw(shares);
     IERC20(vaultToken).safeApprove(vault, withdrawAmount);
     IVovoVault(vault).deposit(withdrawAmount);
     uint256 receivedShares = IERC20(vault).balanceOf(address(this));
@@ -361,7 +358,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit WithdrawToVault(msg.sender, shares, vault, receivedShares);
   }
 
-  function _withdraw(uint256 shares, bool shouldChargeFee) private returns(uint256 withdrawAmount) {
+  function _withdraw(uint256 shares) private returns(uint256 withdrawAmount) {
     require(shares > 0, "!shares");
     withdrawAmount = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for deposit
     _burn(msg.sender, shares);
@@ -429,7 +426,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), collateral, underlying, isLong);
     uint256 feeUsd = IVault(gmxVault).getPositionFee(size);
-    uint256 fundingFee = IVault(gmxVault).getFundingFee(underlying, size, entryFundingRate);
+    uint256 fundingFee = IVault(gmxVault).getFundingFee(collateral, size, entryFundingRate);
     feeUsd = feeUsd.add(fundingFee);
     uint256 positionValueUsd = 0;
     if (hasProfit){
@@ -473,6 +470,10 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit GuardianSet(guardian);
   }
 
+  function setDex(address _dex) external onlyGovernor {
+    dex = _dex;
+  }
+
   function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyGovernor {
     // ensure performanceFee is smaller than 50% and management fee is smaller than 5%
     require(_performanceFee < 5000 && _managementFee < 500, "!too-much");
@@ -487,7 +488,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit LeverageSet(leverage);
   }
 
-  function setIsLong(bool _isLong) external onlyGovernor {
+  function setIsLong(bool _isLong) external nonReentrant onlyGovernor {
     closeTrade();
     isLong = _isLong;
     emit isLongSet(isLong);
