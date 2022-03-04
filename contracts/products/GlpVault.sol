@@ -40,16 +40,12 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   address public constant usdc = address(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
   // weth token address
   address public constant weth = address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
-  // gmx token address
-  address public constant gmx = address(0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a);
   // glp token address
   address public constant glp = address(0x4277f8F2c384827B5273592FF7CeBd9f2C1ac258);
   // glpManager address
   address public constant glpManager = address(0x321F653eED006AD1C29D174e17d96351BDe22649);
   // fsGLP token address
   address public constant fsGLP = address(0x1aDDD80E6039594eE970E5872D247bf0414C8903);
-  // fGLP address
-  address public constant fGLP = address(0x4e971a87900b931fF39d1Aad67697F49835400b6);
   // staked Glp address
   address public constant stakedGlp = address(0x01AF26b74409d10e15b102621EDd29c326ba1c55);
   // glp reward router address
@@ -108,10 +104,8 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   event SlipSet(uint256 slip);
   event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
   event ParametersSet(bool isDepositEnabled, uint256 cap, uint256 pokeInterval, bool isKeeperOnly, address rewards);
-  event KeeperAdded(address keeper);
-  event KeeperRemoved(address keeper);
-  event VaultRegistered(address fromVault, address toVault);
-  event VaultRevoked(address fromVault, address toVault);
+  event KeeperSet(address keeper, bool isActive);
+  event VaultSet(address fromVault, address toVault, bool isActive);
 
   function initialize(
     string memory _vaultName,
@@ -317,7 +311,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @notice Only can be called by keepers to close the position and stake weth profit in case the poke() does not work
    * @return glpAmount the amount of glp minted and staked
    */
-  function closeTradeByKeeper() external returns(uint256 glpAmount){
+  function closeTradeByKeeper() external returns(uint256 glpAmount) {
     require(keepers[msg.sender], "!keepers");
     closeTrade();
     uint256 wethBalance = IERC20(weth).balanceOf(address(this));
@@ -332,14 +326,14 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @notice Close leverage position at GMX
    */
   function closeTrade() private {
-    (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    address collateral = isLong ? underlying : usdc;
+    (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), collateral, underlying, isLong);
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
     uint256 _wethPrice = IVault(gmxVault).getMinPrice(weth);
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _wethPrice, size, isLong, 0, 0);
       return;
     }
-    address collateral = isLong ? underlying : usdc;
     uint256 _before = IERC20(weth).balanceOf(address(this));
     if (weth == collateral) {
       IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
@@ -432,15 +426,21 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @notice get the active leverage position value in GLP
    */
   function getActivePositionValue() public view returns (uint256) {
-    (uint256 size, uint256 collateral,,uint256 entryFundingRate,,,,) = IVault(gmxVault).getPosition(address(this), underlying, underlying, isLong);
+    address collateral = isLong ? underlying : usdc;
+    (uint256 size, uint256 collateralAmount,,uint256 entryFundingRate,,,,) = IVault(gmxVault).getPosition(address(this), collateral, underlying, isLong);
     if (size == 0) {
       return 0;
     }
-    (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), underlying, underlying, isLong);
+    (bool hasProfit, uint256 delta) = IVault(gmxVault).getPositionDelta(address(this), collateral, underlying, isLong);
     uint256 feeUsd = IVault(gmxVault).getPositionFee(size);
-    uint256 fundingFee = IVault(gmxVault).getFundingFee(underlying, size, entryFundingRate);
+    uint256 fundingFee = IVault(gmxVault).getFundingFee(collateral, size, entryFundingRate);
     feeUsd = feeUsd.add(fundingFee);
-    uint256 positionValueUsd = hasProfit ? collateral.add(delta).sub(feeUsd) : collateral.sub(delta).sub(feeUsd);
+    uint256 positionValueUsd = 0;
+    if (hasProfit){
+      positionValueUsd = collateralAmount.add(delta) > feeUsd ? collateralAmount.add(delta).sub(feeUsd) : 0;
+    } else {
+      positionValueUsd = collateralAmount > delta.add(feeUsd) ? collateralAmount.sub(delta).sub(feeUsd) : 0;
+    }
     uint256 positionValue = IVault(gmxVault).usdToTokenMin(weth, positionValueUsd);
     // Cap the positionValue to avoid the oracle manipulation
     if (positionValue > currentTokenReward.mul(maxCollateralMultiplier)) {
@@ -493,7 +493,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit LeverageSet(leverage);
   }
 
-  function setIsLong(bool _isLong) external onlyGovernor {
+  function setIsLong(bool _isLong) external nonReentrant onlyGovernor {
     closeTrade();
     isLong = _isLong;
     emit isLongSet(isLong);
@@ -522,24 +522,14 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
 
   // ===== Permissioned Actions: Admin =====
 
-  function addKeeper(address _keeper) external onlyAdmin {
-    keepers[_keeper] = true;
-    emit KeeperAdded(_keeper);
+  function setKeeper(address _keeper, bool _isActive) external onlyAdmin {
+    keepers[_keeper] = _isActive;
+    emit KeeperSet(_keeper, _isActive);
   }
 
-  function removeKeeper(address _keeper) external onlyAdmin {
-    keepers[_keeper] = false;
-    emit KeeperRemoved(_keeper);
-  }
-
-  function registerVault(address fromVault, address toVault) external onlyAdmin {
-    withdrawMapping[fromVault][toVault] = true;
-    emit VaultRegistered(fromVault, toVault);
-  }
-
-  function revokeVault(address fromVault, address toVault) external onlyAdmin {
-    withdrawMapping[fromVault][toVault] = false;
-    emit VaultRevoked(fromVault, toVault);
+  function setVault(address fromVault, address toVault, bool isActive) external onlyAdmin {
+    withdrawMapping[fromVault][toVault] = isActive;
+    emit VaultSet(fromVault, toVault, isActive);
   }
 
   /// ===== Permissioned Actions: Guardian =====

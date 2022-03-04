@@ -137,13 +137,17 @@ describe("PPV", function () {
         console.log("share price1 max", (await ppv.getPricePerShare(true)).toString());
 
         const tx = await ppv.connect(owner).poke();
-        const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
+        const position = await ppv.getActivePositionValue();
+        console.log("active position 1", position);
+        // const position = await gmxVaultContract.getPosition(ppv.address, weth, weth, true);
         console.log("balance min", (await ppv.balance(false)).toString());
         console.log("balance max", (await ppv.balance(true)).toString())
         expect(await tx).to.emit(ppv, "OpenPosition");
 
         const tx1 = await ppv2.connect(owner).poke();
         expect(await tx1).to.emit(ppv2, "OpenPosition");
+        const position1 = await ppv.getActivePositionValue();
+        console.log("active position 2", position1)
 
         // 2nd poke after another day
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])

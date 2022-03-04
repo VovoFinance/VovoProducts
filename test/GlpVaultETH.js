@@ -81,7 +81,7 @@ describe("GlpVault", function () {
             "0x1000000000000000000000000000",
         ]);
 
-        
+
         const signer = await ethers.getSigner("0x096760F208390250649E3e8763348E783AEF5562")
 
         gmxVaultContract = new ethers.Contract(gmxVault, gmxVaultABI, signer);
@@ -158,12 +158,12 @@ describe("GlpVault", function () {
         assertAlmostEqual(afterBalance, beforeBalance.div(2));
         // withdraw to vault
         await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
-        await glpVault.connect(owner).registerVault(glpVault.address, glpVault2.address);
+        await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, true);
         await glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address);
         assertAlmostEqual(await glpVault.balanceOf(owner.address), beforeBalance.div(4));
         // expect(await glpVault2.balanceOf(owner.address)).to.be.greaterThan("0");
 
-        await glpVault.connect(owner).revokeVault(glpVault.address, glpVault2.address);
+        await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, false);
         await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
         // withdraw all
         // await ppv.connect(owner).withdrawAll();
