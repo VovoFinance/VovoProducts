@@ -30,12 +30,8 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
 
   // usdc token address
   address public constant usdc = address(0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8);
-  // weth token address
-  address public constant weth = address(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1);
   // crv token address
   address public constant crv = address(0x11cDb42B0EB46D95f990BeDD4695A6e3fA034978);
-  // sushiswap address
-  address public constant sushiswap = address(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
 
   uint256 public constant FEE_DENOMINATOR = 10000;
   uint256 public constant DENOMINATOR = 10000;
