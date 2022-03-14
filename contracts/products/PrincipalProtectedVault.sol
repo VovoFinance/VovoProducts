@@ -357,7 +357,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
 
   function _withdraw(uint256 shares) private returns(uint256 withdrawAmount) {
     require(shares > 0, "!shares");
-    withdrawAmount = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for deposit
+    withdrawAmount = (balance(false).mul(shares)).div(totalSupply()); // use minimum vault balance for withdraw
     _burn(msg.sender, shares);
 
     uint256 b = IERC20(vaultToken).balanceOf(address(this));
