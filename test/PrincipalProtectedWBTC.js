@@ -36,7 +36,7 @@ function assertAlmostEqual(actual, expected, accuracy = 1000) {
 
 describe("PPV WBTC", function () {
     this.timeout(500000);
-    let addrs = [], owner, governor, admin, keeper, rewards, ppv, ppv2, usdcContract, wbtcContract, sushiContract, lpContract, gaugeContract, gmxVaultContract;
+    let addrs = [], owner, governor, admin, keeper, rewards, ppv, ppv2, usdcContract, wbtcContract, sushiContract, lpContract, gaugeContract, gmxVaultContract, univ3Swapper;
     const depositAmount = BigNumber.from("1000000000"); // 10 btc
     before(async () => {
         addrs = provider.getWallets();
@@ -45,6 +45,10 @@ describe("PPV WBTC", function () {
         admin = addrs[2];
         rewards = addrs[3];
         keeper = addrs[4];
+
+        const univ3SwapperContract = await ethers.getContractFactory("Univ3Swapper");
+        univ3Swapper = await univ3SwapperContract.connect(owner).deploy( "0xE592427A0AEce92De3Edee1F18E0157C05861564", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", 3000, 500);
+
         const ppvContract = await ethers.getContractFactory("PrincipalProtectedVault");
         ppv = await ppvContract.connect(owner).deploy()
         await ppv.initialize(
@@ -60,7 +64,8 @@ describe("PPV WBTC", function () {
             true, // isLong
             "10000000000", // cap: 100 btc
             "100000000", // vaultToken base: 1e8
-            "1000000000000000000" // underlying base: 1e8
+            "1000000000000000000", // underlying base: 1e8
+            univ3Swapper.address
         )
         ppv2 = await ppvContract.connect(owner).deploy()
         await ppv2.initialize(
@@ -76,7 +81,8 @@ describe("PPV WBTC", function () {
             false, // isLong
             "10000000000", // cap: 100 btc
             "100000000", // vaultToken base: 1e8
-            "1000000000000000000" // underlying base: 1e8
+            "1000000000000000000", // underlying base: 1e8
+            univ3Swapper.address
         )
 
         await network.provider.request({
@@ -103,6 +109,11 @@ describe("PPV WBTC", function () {
         lpContract = new ethers.Contract(_2crv, lpABI, signer);
         gaugeContract = new ethers.Contract(gauge, gaugeABI, signer);
         gmxVaultContract = new ethers.Contract(gmxVault, gmxVaultABI, signer);
+        // await ppv.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        // await ppv2.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+
+        await ppv.setRewards(rewards.address);
+        await ppv2.setRewards(rewards.address);
     })
 
     it("deposit", async() => {
@@ -124,8 +135,6 @@ describe("PPV WBTC", function () {
         const virtualPrice = await lpContract.get_virtual_price();
         console.log("virtual price", virtualPrice.toString())
         const expectedDepositedLP = depositAmount.mul("10000000000000000000000000000").div(virtualPrice);
-        console.log("gauge balance", (await gaugeContract.balanceOf(ppv.address)).toString())
-        console.log("expectedDepositedLP", expectedDepositedLP.toString())
         assertAlmostEqual(await gaugeContract.balanceOf(ppv.address), expectedDepositedLP, 100);
     }).timeout(500000)
 
@@ -193,11 +202,11 @@ describe("PPV WBTC", function () {
         await ppv.connect(admin).removeKeeper(keeper.address);
     })
 
-    it("set performance fee", async() => {
+    it("set fees", async() => {
         await expect(ppv.connect(admin).setFees("3000", "100")).to.be.revertedWith("!governor");
         await ppv.connect(governor).setFees("3000", "100");
         expect((await ppv.performanceFee()).toString()).to.be.equal("3000");
-        expect((await ppv.withdrawalFee()).toString()).to.be.equal("100");
+        expect((await ppv.managementFee()).toString()).to.be.equal("100");
     })
 
     it("set isLong", async() => {
@@ -218,16 +227,13 @@ describe("PPV WBTC", function () {
         expect((await ppv.slip()).toString()).to.be.equal("5000");
     })
 
-    it("set DepositEnabled", async() => {
-        await expect(ppv.connect(admin).setDepositEnabledAndCap(false, "1000000000000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setDepositEnabledAndCap(false, "1000000000000");
+    it("set parameters", async() => {
+        await expect(ppv.connect(admin).setParameters(false, "1000000000000", "100000", true)).to.be.revertedWith("!governor");
+        await ppv.connect(governor).setParameters(false, "1000000000000", "100000", true);
         expect((await ppv.isDepositEnabled()).toString()).to.be.equal("false");
         expect((await ppv.cap()).toString()).to.be.equal("1000000000000");
+        expect((await ppv.pokeInterval()).toString()).to.be.equal("100000");
+        expect((await ppv.isKeeperOnly()).toString()).to.be.equal("true");
     })
 
-    it("set poke interval", async() => {
-        await expect(ppv.connect(admin).setPokeInterval("100000")).to.be.revertedWith("!governor");
-        await ppv.connect(governor).setPokeInterval("100000");
-        expect((await ppv.pokeInterval()).toString()).to.be.equal("100000");
-    })
 });
