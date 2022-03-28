@@ -126,7 +126,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     governor = msg.sender;
     admin = msg.sender;
     guardian = msg.sender;
-    gmxPositionManager = address(0x98a00666CfCb2BA5A405415C2BF6547C63bf5491);
+    gmxPositionManager = address(0x87a4088Bd721F83b6c2E5102e2FA47022Cb1c831);
     gmxRouter = address(0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064);
     gmxVault = address(0x489ee077994B6658eAfA855C308275EAd8097C4A);
     keepers[msg.sender] = true;
@@ -307,14 +307,15 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
       return;
     }
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
+    IRouter(gmxRouter).approvePlugin(gmxPositionManager);
     if (vaultToken == collateral) {
-      IRouter(gmxRouter).decreasePosition(collateral, underlying, 0, size, isLong, address(this), _underlyingPrice);
+      IRouter(gmxPositionManager).decreasePosition(collateral, underlying, 0, size, isLong, address(this), _underlyingPrice);
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
       path[0] = collateral;
       path[1] = vaultToken;
-      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
+      IRouter(gmxPositionManager).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
     }
     uint256 _after = IERC20(vaultToken).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
