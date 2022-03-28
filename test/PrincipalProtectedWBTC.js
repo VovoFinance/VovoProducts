@@ -135,6 +135,8 @@ describe("PPV WBTC", function () {
         const virtualPrice = await lpContract.get_virtual_price();
         console.log("virtual price", virtualPrice.toString())
         const expectedDepositedLP = depositAmount.mul("10000000000000000000000000000").div(virtualPrice);
+        console.log("gauge balance", (await gaugeContract.balanceOf(ppv.address)).toString())
+        console.log("expectedDepositedLP", expectedDepositedLP.toString())
         assertAlmostEqual(await gaugeContract.balanceOf(ppv.address), expectedDepositedLP, 100);
     }).timeout(500000)
 
