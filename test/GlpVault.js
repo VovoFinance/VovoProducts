@@ -142,7 +142,7 @@ describe("GlpVault", function () {
         const tx = await glpVault.connect(owner).poke();
         const position = await gmxVaultContract.getPosition(glpVault.address, weth, weth, true);
         expect(await tx).to.emit(glpVault, "OpenPosition");
-
+        console.log("active position1", (await glpVault.getActivePositionValue()).toString())
         // const tx1 = await glpVault2.connect(owner).poke();
         // expect(await tx1).to.emit(glpVault2, "OpenPosition");
 
@@ -157,6 +157,7 @@ describe("GlpVault", function () {
         expect(await tx2).to.emit(glpVault, "OpenPosition");
         console.log("share price2 min", (await glpVault.getPricePerShare(false)).toString());
         console.log("share price2 max", (await glpVault.getPricePerShare(true)).toString());
+        console.log("active position2", (await glpVault.getActivePositionValue()).toString())
     }).timeout(500000000)
 
     it("withdraw", async() => {

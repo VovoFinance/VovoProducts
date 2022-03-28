@@ -328,21 +328,22 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   function closeTrade() private {
     address collateral = isLong ? underlying : usdc;
     (uint256 size,,,,,,,) = IVault(gmxVault).getPosition(address(this), collateral, underlying, isLong);
-    uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
+    uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMinPrice(underlying) : IVault(gmxVault).getMaxPrice(underlying);
     uint256 _wethPrice = IVault(gmxVault).getMinPrice(weth);
     if (size == 0) {
       emit ClosePosition(underlying, _underlyingPrice, _wethPrice, size, isLong, 0, 0);
       return;
     }
     uint256 _before = IERC20(weth).balanceOf(address(this));
+    IRouter(gmxRouter).approvePlugin(gmxPositionManager);
     if (weth == collateral) {
-      IRouter(gmxRouter).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
+      IRouter(gmxPositionManager).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
       path[0] = collateral;
       path[1] = weth;
-      IRouter(gmxRouter).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
+      IRouter(gmxPositionManager).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
     }
     uint256 _after = IERC20(weth).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
@@ -447,7 +448,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
       uint256 newPositionValue = currentTokenReward.mul(maxCollateralMultiplier);
       positionValueUsd = newPositionValue.mul(positionValueUsd).div(positionValue);
     }
-    return positionValueUsd.mul(1e12).div(getGlpPrice());
+    return positionValueUsd.mul(1e6).div(getGlpPrice());
   }
 
   function getClaimableReward() public view returns (uint256) {

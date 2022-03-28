@@ -33,7 +33,7 @@ function assertAlmostEqual(actual, expected, accuracy = 1000) {
     )
 }
 
-describe("GlpVault", function () {
+describe("GlpVaultETH", function () {
     this.timeout(500000000);
     let addrs = [], owner, governor, admin, keeper, rewards, glpVault, glpVault2, fsGlpContract, stakedGlpContract, gmxVaultContract;
     const depositAmount = BigNumber.from("100000000000000000000"); // 100 eth
