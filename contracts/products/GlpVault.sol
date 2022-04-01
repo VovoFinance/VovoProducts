@@ -56,7 +56,6 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   address public constant feeGmxTracker = address(0xd2D1162512F927a7e282Ef43a362659E4F2a728F);
 
   uint256 public constant FEE_DENOMINATOR = 10000;
-  uint256 public constant DENOMINATOR = 10000;
 
   address public underlying; // underlying token of the leverage position
   uint256 public managementFee;
@@ -66,9 +65,11 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   uint256 public underlyingBase;
   uint256 public lastPokeTime;
   uint256 public pokeInterval;
+  uint256 public withdrawInterval;
   uint256 public currentTokenReward;
   bool public isKeeperOnly;
   bool public isDepositEnabled;
+  bool public isFreeWithdraw;
   uint256 public leverage;
   bool public isLong;
   address public governor;
@@ -85,7 +86,6 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
 
   event Deposited(address depositor, address account, uint256 shares, uint256 glpAmount, address tokenIn, uint256 tokenInAmount);
   event DepositedGlp(address depositor, address account, uint256 shares, uint256 glpAmount);
-  event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event Poked(uint256 tokenReward, uint256 glpAmount, uint256 pricePerShare, uint256 fee);
   event CollectedRewardByKeeper(address keeper, uint256 tokenReward, uint256 glpAmount);
   event ClosedTradeByKeeper(address keeper, uint256 earning, uint256 glpAmount);
@@ -101,9 +101,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
   event GmxContractsSet(address gmxPositionManager, address gmxRouter, address gmxVault);
-  event SlipSet(uint256 slip);
-  event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
-  event ParametersSet(bool isDepositEnabled, uint256 cap, uint256 pokeInterval, bool isKeeperOnly, address rewards);
+  event ParametersSet(bool isDepositEnabled, uint256 _maxCollateralMultiplier, uint256 cap, uint256 pokeInterval, uint256 withdrawInterval, bool isKeeperOnly, bool isFreeWithdraw, address rewards);
   event KeeperSet(address keeper, bool isActive);
   event VaultSet(address fromVault, address toVault, bool isActive);
 
@@ -129,6 +127,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     underlyingBase = _underlyingBase;
     lastPokeTime = block.timestamp;
     pokeInterval = 7 days;
+    withdrawInterval = 1 days;
     governor = msg.sender;
     admin = msg.sender;
     guardian = msg.sender;
@@ -138,6 +137,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     keepers[msg.sender] = true;
     isKeeperOnly = true;
     isDepositEnabled = true;
+    isFreeWithdraw = false;
     managementFee = 200;
     performanceFee = 1000;
     maxCollateralMultiplier = leverage;
@@ -177,6 +177,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @return number of shares minted to account
    */
   function depositFor(address tokenIn, uint256 tokenInAmount, uint256 minGlp, address account) public whenNotPaused payable nonReentrant returns(uint256) {
+    require(block.timestamp > lastPokeTime.add(withdrawInterval), "!deposit-time");
     uint256 _pool = balance(true); // use max vault balance for deposit
     uint256 _before = IERC20(tokenIn).uniBalanceOf(address(this));
     IERC20(tokenIn).uniTransferFromSenderToThis(tokenInAmount);
@@ -217,6 +218,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @return number of shares minted to account
    */
   function depositGlpFor(uint256 glpAmount, address account) public whenNotPaused nonReentrant returns(uint256) {
+    require(block.timestamp > lastPokeTime.add(withdrawInterval), "!deposit-time");
     uint256 _pool = balance(true);// use max vault balance for deposit
     require(isDepositEnabled && _pool.add(glpAmount) < cap, "!deposit");
     IStakedGlp(stakedGlp).transferFrom(msg.sender, address(this), glpAmount);
@@ -389,6 +391,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @return tokenOutAmount the amount of tokenOut that is withdrawn
    */
   function withdraw(address tokenOut, uint256 shares, uint256 minOut) external whenNotPaused returns(uint256 tokenOutAmount) {
+    require(block.timestamp <= lastPokeTime.add(withdrawInterval) || isFreeWithdraw, "!withdraw-time");
     require(shares > 0, "!shares");
     uint256 glpAmount = (balance(false).mul(shares)).div(totalSupply()); // use min vault balance for withdraw
     _burn(msg.sender, shares);
@@ -408,6 +411,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    * @return glpAmount amount of glp that is withdrawn
    */
   function withdrawGlp(uint256 shares) external whenNotPaused returns(uint256 glpAmount) {
+    require(block.timestamp <= lastPokeTime.add(withdrawInterval) || isFreeWithdraw, "!withdraw-time");
     require(shares > 0, "!shares");
     glpAmount = balance(false).mul(shares).div(totalSupply()); // use min vault balance for withdraw
     _burn(msg.sender, shares);
@@ -507,35 +511,46 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     emit GmxContractsSet(gmxPositionManager, gmxRouter, gmxVault);
   }
 
-  function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) external onlyGovernor {
+  function setParameters(
+    bool _isDepositEnabled,
+    uint256 _maxCollateralMultiplier,
+    uint256 _cap,
+    uint256 _pokeInterval,
+    uint256 _withdrawInterval,
+    bool _isKeeperOnly,
+    bool _isFreeWithdraw,
+    address _rewards
+  ) external onlyGovernor {
     require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50, "!maxCollateralMultiplier");
-    maxCollateralMultiplier = _maxCollateralMultiplier;
-  }
-
-  function setParameters(bool _isDepositEnabled, uint256 _cap, uint256 _pokeInterval, bool _isKeeperOnly, address _rewards) external onlyGovernor {
     isDepositEnabled = _isDepositEnabled;
+    maxCollateralMultiplier = _maxCollateralMultiplier;
     cap = _cap;
     pokeInterval = _pokeInterval;
+    withdrawInterval = _withdrawInterval;
     isKeeperOnly = _isKeeperOnly;
+    isFreeWithdraw = _isFreeWithdraw;
     rewards = _rewards;
-    emit ParametersSet(isDepositEnabled, cap, pokeInterval, isKeeperOnly, rewards);
+    emit ParametersSet(isDepositEnabled, maxCollateralMultiplier, cap, pokeInterval, withdrawInterval, isFreeWithdraw, isKeeperOnly, rewards);
   }
 
   // ===== Permissioned Actions: Admin =====
 
-  function setKeeper(address _keeper, bool _isActive) external onlyAdmin {
+  function setKeeper(address _keeper, bool _isActive) external {
+    require(msg.sender == admin, "!admin");
     keepers[_keeper] = _isActive;
     emit KeeperSet(_keeper, _isActive);
   }
 
-  function setVault(address fromVault, address toVault, bool isActive) external onlyAdmin {
+  function setVault(address fromVault, address toVault, bool isActive) external {
+    require(msg.sender == admin, "!admin");
     withdrawMapping[fromVault][toVault] = isActive;
     emit VaultSet(fromVault, toVault, isActive);
   }
 
   /// ===== Permissioned Actions: Guardian =====
 
-  function pause() external onlyGuardian {
+  function pause() external {
+    require(msg.sender == guardian, "!guradian");
     _pause();
   }
 
@@ -549,16 +564,6 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
 
   modifier onlyGovernor() {
     require(msg.sender == governor, "!governor");
-    _;
-  }
-
-  modifier onlyAdmin() {
-    require(msg.sender == admin, "!admin");
-    _;
-  }
-
-  modifier onlyGuardian() {
-    require(msg.sender == guardian, "!pausers");
     _;
   }
 

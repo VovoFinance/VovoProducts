@@ -56,7 +56,7 @@ describe("PPV", function () {
             "0x7f90122BF0700F9E7e1F688fe926940E8839F353", // lpToken: _2crv
             "0xbF7E49483881C76487b0989CD7d9A8239B20CA41", // gauge
             owner.address, // rewards
-            "20", // leverage
+            "5", // leverage
             true, // isLong
             "10000000000000", // cap: 10m usdc
             "1000000", // vaultToken base: 1e6
@@ -73,7 +73,7 @@ describe("PPV", function () {
             "0x7f90122BF0700F9E7e1F688fe926940E8839F353", // lpToken: _2crv
             "0xbF7E49483881C76487b0989CD7d9A8239B20CA41", // gauge
             owner.address, // rewards
-            "20", // leverage
+            "5", // leverage
             false, // isLong
             "10000000000000", // cap: 10m usdc
             "1000000", // vaultToken base

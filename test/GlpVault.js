@@ -52,7 +52,7 @@ describe("GlpVault", function () {
             16,
             "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // underlying: weth
             owner.address, // rewards
-            "20", // leverage
+            "5", // leverage
             true, // isLong
             "10000000000000000000000000", // cap: 10m glp
             "1000000000000000000" // underlying base: 1e18
@@ -87,11 +87,14 @@ describe("GlpVault", function () {
         fsGlpContract = new ethers.Contract(fsGLP, fsGLPABI, signer);
         stakedGlpContract = new ethers.Contract(stakedGlp, stakedGlpABI, signer);
 
-        await glpVault.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        // await glpVault.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
+        await glpVault.connect(owner).setParameters(true, 5, "10000000000000000000000000",  "100000", "86400", true, true, rewards.address);
     })
 
     it("deposit", async() => {
         // const startUserBalance = await usdcContract.balanceOf(owner.address);
+        await provider.send("evm_increaseTime", [86400])
+        await provider.send("evm_mine")
         await usdcContract.connect(owner).approve(glpVault.address, depositAmount.mul(2))
         await glpVault.connect(owner).deposit(usdc, depositAmount.mul(2), 0)
         const glpPrice = await glpVault.getGlpPrice();
@@ -219,11 +222,13 @@ describe("GlpVault", function () {
     })
 
     it("set setParameters", async() => {
-        await expect(glpVault.connect(admin).setParameters(false, "1000000000000",  "100000", true, rewards.address)).to.be.revertedWith("!governor");
-        await glpVault.connect(governor).setParameters(false, "1000000000000", "100000", true, rewards.address);
+        await expect(glpVault.connect(admin).setParameters(false, 5, "1000000000000",  "100000", "10000000", true, true, rewards.address)).to.be.revertedWith("!governor");
+        await glpVault.connect(governor).setParameters(false, 5, "1000000000000", "100000", "10000000", true, true, rewards.address);
         expect((await glpVault.isDepositEnabled()).toString()).to.be.equal("false");
         expect((await glpVault.cap()).toString()).to.be.equal("1000000000000");
         expect((await glpVault.pokeInterval()).toString()).to.be.equal("100000");
+        expect((await glpVault.withdrawInterval()).toString()).to.be.equal("10000000");
+        expect((await glpVault.isFreeWithdraw()).toString()).to.be.equal("true");
         expect((await glpVault.isKeeperOnly()).toString()).to.be.equal("true");
         expect((await glpVault.rewards()).toString()).to.be.equal(rewards.address);
     })

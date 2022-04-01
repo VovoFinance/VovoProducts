@@ -87,10 +87,13 @@ describe("GlpVaultETH", function () {
         gmxVaultContract = new ethers.Contract(gmxVault, gmxVaultABI, signer);
         fsGlpContract = new ethers.Contract(fsGLP, fsGLPABI, signer);
         stakedGlpContract = new ethers.Contract(stakedGlp, stakedGlpABI, signer);
+        await glpVault.connect(owner).setParameters(true, 5, "10000000000000000000000000",  "100000", "86400", true, true, rewards.address);
     })
 
     it("deposit eth", async() => {
         // const startUserBalance = await usdcContract.balanceOf(owner.address);
+        await provider.send("evm_increaseTime", [86400])
+        await provider.send("evm_mine")
         await glpVault.connect(owner).deposit(eth, depositAmount.mul(2), 0, {from: owner.address, value:  (depositAmount.mul(2)).toString(), gasPrice: gasPrice})
         const glpPrice = await glpVault.getGlpPrice();
         const ethPrice = await gmxVaultContract.getMinPrice(weth);
