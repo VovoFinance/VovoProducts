@@ -302,8 +302,8 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     uint256 _underlyingPrice = isLong ? IVault(gmxVault).getMaxPrice(underlying) : IVault(gmxVault).getMinPrice(underlying);
     uint256 _wethPrice = IVault(gmxVault).getMinPrice(weth);
     uint256 _sizeDelta = leverage.mul(amount).mul(_wethPrice).div(1e18);
-    IERC20(underlying).safeApprove(gmxRouter, 0);
-    IERC20(underlying).safeApprove(gmxRouter, amount);
+    IERC20(weth).safeApprove(gmxRouter, 0);
+    IERC20(weth).safeApprove(gmxRouter, amount);
     IRouter(gmxRouter).approvePlugin(gmxPositionManager);
     IRouter(gmxPositionManager).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
     emit OpenPosition(underlying, _underlyingPrice, _wethPrice, _sizeDelta, isLong, amount);
