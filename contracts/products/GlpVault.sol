@@ -47,7 +47,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   // fsGLP token address
   address public constant fsGLP = address(0x1aDDD80E6039594eE970E5872D247bf0414C8903);
   // staked Glp address
-  address public constant stakedGlp = address(0x01AF26b74409d10e15b102621EDd29c326ba1c55);
+  address public constant stakedGlp = address(0x2F546AD4eDD93B956C8999Be404cdCAFde3E89AE);
   // glp reward router address
   address public constant rewardRouter = address(0xA906F338CB21815cBc4Bc87ace9e68c87eF8d8F1);
   // glp fee reward tracker address

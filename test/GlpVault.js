@@ -16,7 +16,7 @@ const glp = "0x4277f8F2c384827B5273592FF7CeBd9f2C1ac258"
 const glpManager = "0x321F653eED006AD1C29D174e17d96351BDe22649";
 const fsGLP = "0x1aDDD80E6039594eE970E5872D247bf0414C8903";
 const fGLP = "0x4e971a87900b931fF39d1Aad67697F49835400b6";
-const stakedGlp = "0x01AF26b74409d10e15b102621EDd29c326ba1c55";
+const stakedGlp = "0x2F546AD4eDD93B956C8999Be404cdCAFde3E89AE";
 
 function assertAlmostEqual(actual, expected, accuracy = 1000) {
     const expectedBN = BigNumber.isBigNumber(expected) ? expected : BigNumber.from(expected)
