@@ -17,6 +17,7 @@ import "../interfaces/curve/Curve.sol";
 import "../interfaces/uniswap/Uni.sol";
 import "../interfaces/gmx/IRouter.sol";
 import "../interfaces/gmx/IVault.sol";
+import "../interfaces/curve/GaugeFactory.sol";
 
 /**
  * @title PrincipalProtectedVault
@@ -68,6 +69,11 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
+  // added these two parameters in the upgraded contract to move liquidity to new gauge because of the Curve gauge migration:
+  // https://gov.curve.fi/t/sidechain-gauge-upgrade-and-migration/3869
+  address public constant newGauge = address(0xCE5F24B7A95e9cBa7df4B54E911B4A3Dc8CDAf6f);
+  address public constant gaugeFactory = address(0xabC000d88f23Bb45525E447528DBF656A9D55bf5);
+
   event Deposit(address depositor, address account, uint256 amount, uint256 shares);
   event LiquidityAdded(uint256 tokenAmount, uint256 lpMinted);
   event GaugeDeposited(uint256 lpDeposited);
@@ -80,9 +86,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
   event AdminSet(address admin);
   event GuardianSet(address guardian);
   event FeeSet(uint256 performanceFee, uint256 withdrawalFee);
-  event LeverageSet(uint256 leverage);
   event isLongSet(bool isLong);
-  event RewardsSet(address rewards);
   event GmxContractsSet(address gmxPositionManager, address gmxRouter, address gmxVault);
   event MaxCollateralMultiplierSet(uint256 maxCollateralMultiplier);
   event ParametersSet(bool isDepositEnabled, uint256 cap, uint256 pokeInterval, bool isKeeperOnly);
@@ -147,7 +151,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    */
   function balance(bool isMax) public view returns (uint256) {
     uint256 lpPrice = ICurveFi(lpToken).get_virtual_price();
-    uint256 lpAmount = Gauge(gauge).balanceOf(address(this));
+    uint256 lpAmount = Gauge(newGauge).balanceOf(address(this));
     uint256 lpValue = lpPrice.mul(lpAmount).mul(vaultTokenBase).div(1e36);
     if (isMax) {
       return lpValue.add(getActivePositionValue()).add(getEstimatedPendingRewardValue()).add(IERC20(vaultToken).balanceOf(address(this)));
@@ -170,9 +174,9 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     }
     uint256 lpBalance = IERC20(lpToken).balanceOf(address(this));
     if (lpBalance > 0) {
-      IERC20(lpToken).safeApprove(gauge, 0);
-      IERC20(lpToken).safeApprove(gauge, lpBalance);
-      Gauge(gauge).deposit(lpBalance);
+      IERC20(lpToken).safeApprove(newGauge, 0);
+      IERC20(lpToken).safeApprove(newGauge, lpBalance);
+      Gauge(newGauge).deposit(lpBalance);
       emit GaugeDeposited(lpBalance);
     }
   }
@@ -221,7 +225,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     _mint(rewards, feeShare);
     currentPokeInterval = block.timestamp.sub(lastPokeTime);
     uint256 tokenReward = 0;
-    if (Gauge(gauge).balanceOf(address(this)) > 0) {
+    if (Gauge(newGauge).balanceOf(address(this)) > 0) {
       tokenReward = collectReward();
     }
     closeTrade();
@@ -250,7 +254,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    */
   function collectReward() private returns(uint256 tokenReward) {
     uint256 _before = IERC20(vaultToken).balanceOf(address(this));
-    Gauge(gauge).claim_rewards(address(this));
+    GaugeFactory(gaugeFactory).mint(newGauge);
     uint256 _crv = IERC20(crv).balanceOf(address(this));
     if (_crv > 0) {
       IERC20(crv).safeApprove(dex, 0);
@@ -391,7 +395,7 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
    */
   function _withdrawSome(uint256 lpAmount) private {
     uint256 _before = IERC20(lpToken).balanceOf(address(this));
-    Gauge(gauge).withdraw(lpAmount);
+    Gauge(newGauge).withdraw(lpAmount);
     uint256 _after = IERC20(lpToken).balanceOf(address(this));
     _withdrawOne(_after.sub(_before));
   }
@@ -405,6 +409,18 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     IERC20(lpToken).safeApprove(lpToken, _amnt);
     uint256 expectedVaultTokenAmount = _amnt.mul(vaultTokenBase).mul(ICurveFi(lpToken).get_virtual_price()).div(1e36);
     ICurveFi(lpToken).remove_liquidity_one_coin(_amnt, 0, expectedVaultTokenAmount.mul(DENOMINATOR.sub(slip)).div(DENOMINATOR));
+  }
+
+  /**
+   * @notice Add this function in the upgraded contract to move liquidity to new gauge because of the Curve gauge migration:
+   * https://gov.curve.fi/t/sidechain-gauge-upgrade-and-migration/3869
+   */
+  function migrateToNewGauge() external onlyAdmin {
+    Gauge(gauge).withdraw(Gauge(gauge).balanceOf(address(this)));
+    uint256 lpBalance = IERC20(lpToken).balanceOf(address(this));
+    IERC20(lpToken).safeApprove(newGauge, 0);
+    IERC20(lpToken).safeApprove(newGauge, lpBalance);
+    Gauge(newGauge).deposit(lpBalance);
   }
 
   /// ===== View Functions =====
@@ -468,10 +484,6 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit GuardianSet(guardian);
   }
 
-  function setDex(address _dex) external onlyGovernor {
-    dex = _dex;
-  }
-
   function setFees(uint256 _performanceFee, uint256 _managementFee) external onlyGovernor {
     // ensure performanceFee is smaller than 50% and management fee is smaller than 5%
     require(_performanceFee < 5000 && _managementFee < 500, "!too-much");
@@ -480,21 +492,10 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit FeeSet(performanceFee, managementFee);
   }
 
-  function setLeverage(uint256 _leverage) external onlyGovernor {
-    require(_leverage >= 1 && _leverage <= 50, "!leverage");
-    leverage = _leverage;
-    emit LeverageSet(leverage);
-  }
-
   function setIsLong(bool _isLong) external nonReentrant onlyGovernor {
     closeTrade();
     isLong = _isLong;
     emit isLongSet(isLong);
-  }
-
-  function setRewards(address _rewards) external onlyGovernor {
-    rewards = _rewards;
-    emit RewardsSet(rewards);
   }
 
   function setGmxContracts(address _gmxPositionManager, address _gmxRouter, address _gmxVault) external onlyGovernor {
@@ -504,21 +505,31 @@ contract PrincipalProtectedVault is Initializable, ERC20Upgradeable, PausableUpg
     emit GmxContractsSet(gmxPositionManager, gmxRouter, gmxVault);
   }
 
-  function setSlip(uint256 _slip) external onlyGovernor {
-    slip = _slip;
-  }
-
   function setMaxCollateralMultiplier(uint256 _maxCollateralMultiplier) external onlyGovernor {
     require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50, "!maxCollateralMultiplier");
     maxCollateralMultiplier = _maxCollateralMultiplier;
     emit MaxCollateralMultiplierSet(maxCollateralMultiplier);
   }
 
-  function setParameters(bool _flag, uint256 _cap, uint256 _pokeInterval, bool _isKeeperOnly) external onlyGovernor {
+  function setParameters(
+    bool _flag,
+    uint256 _cap,
+    uint256 _pokeInterval,
+    bool _isKeeperOnly,
+    uint256 _slip,
+    address _dex,
+    address _rewards,
+    uint256 _leverage
+  ) external onlyGovernor {
+    require(_leverage >= 1 && _leverage <= 50, "!leverage");
     isDepositEnabled = _flag;
     cap = _cap;
     pokeInterval = _pokeInterval;
     isKeeperOnly = _isKeeperOnly;
+    slip = _slip;
+    dex = _dex;
+    rewards = _rewards;
+    leverage = _leverage;
     emit ParametersSet(isDepositEnabled, cap, pokeInterval, isKeeperOnly);
   }
 
