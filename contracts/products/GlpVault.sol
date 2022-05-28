@@ -370,7 +370,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    */
   function withdrawToVault(uint256 shares, address vault) external whenNotPaused nonReentrant {
     require(vault != address(0), "!vault");
-    require(withdrawMapping[address(this)][vault], "Withdraw to vault not allowed");
+    require(withdrawMapping[address(this)][vault], "!withdraw-to-vault");
 
     uint256 glpAmount = balance(false).mul(shares).div(totalSupply()); // use min vault balance for withdraw
     _burn(msg.sender, shares);

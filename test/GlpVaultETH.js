@@ -60,7 +60,7 @@ describe("GlpVaultETH", function () {
         )
 
         glpVault2 = await glpVaultContract.connect(owner).deploy();
-        glpVault2.initialize(
+        await glpVault2.initialize(
             "Vovo GLP ",
             "voGLP",
             16,
@@ -160,14 +160,14 @@ describe("GlpVaultETH", function () {
         console.log("withdraw glp ", (beforeBalance.div(2)).toString())
         assertAlmostEqual(afterBalance, beforeBalance.div(2));
         // withdraw to vault
-        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
+        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!withdraw-to-vault"); // withdraw half
         await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, true);
         await glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address);
         assertAlmostEqual(await glpVault.balanceOf(owner.address), beforeBalance.div(4));
         // expect(await glpVault2.balanceOf(owner.address)).to.be.greaterThan("0");
 
         await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, false);
-        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("Withdraw to vault not allowed"); // withdraw half
+        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!withdraw-to-vault"); // withdraw half
         // withdraw all
         // await ppv.connect(owner).withdrawAll();
         // expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
