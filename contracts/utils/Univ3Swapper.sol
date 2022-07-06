@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.7.6;
+pragma solidity ^0.7.0;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 import '@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol';
+import "../interfaces/uniswap/ISwapper.sol";
 
-contract Univ3Swapper {
+contract Univ3Swapper is ISwapper {
 
-    address public swapRouter;
-    address public weth;
+    address public immutable swapRouter;
+    address public immutable weth;
     uint24 public poolFee1;
     uint24 public poolFee2;
     address public governor;
+
+    event PoolFeesSet(uint24 _poolFee1, uint24 _poolFee2);
+    event GovernorSet(address indexed governor);
 
     constructor(address _swapRouter, address _weth, uint24 _poolFee1, uint24 _poolFee2) {
         swapRouter = _swapRouter;
@@ -23,7 +27,7 @@ contract Univ3Swapper {
         governor = msg.sender;
     }
 
-    function swap(address tokenIn, address tokenOut, uint256 amountIn) external {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn) external override returns (uint256 amountOut) {
         TransferHelper.safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
         TransferHelper.safeApprove(tokenIn, swapRouter, amountIn);
 
@@ -35,16 +39,19 @@ contract Univ3Swapper {
         amountIn: amountIn,
         amountOutMinimum: 0
         });
-        ISwapRouter(swapRouter).exactInput(params);
+        amountOut = ISwapRouter(swapRouter).exactInput(params);
     }
 
     function setPoolFees(uint24 _poolFee1, uint24 _poolFee2) external onlyGovernor {
         poolFee1 = _poolFee1;
         poolFee2 = _poolFee2;
+        emit PoolFeesSet(_poolFee1, _poolFee2);
     }
 
     function setGovernor(address _governor) external onlyGovernor {
+        require(_governor != address(0), "cannot be 0 address");
         governor = _governor;
+        emit GovernorSet(_governor);
     }
 
     modifier onlyGovernor() {

@@ -2,6 +2,7 @@ require("@nomiclabs/hardhat-waffle");
 require('@openzeppelin/hardhat-upgrades');
 require("@nomiclabs/hardhat-web3");
 require("@nomiclabs/hardhat-etherscan");
+require('hardhat-contract-sizer');
 // require("hardhat-gas-reporter");
 const { infuraApiKey, infuraArbApiKey, kovankey, etherscanApiKey } = require('./secrets.json');
 
@@ -18,7 +19,7 @@ module.exports = {
     hardhat: {
       forking: {
         url: `https://arbitrum-mainnet.infura.io/v3/${infuraArbApiKey}`,
-        blockNumber: 8671892
+        blockNumber: 12196487
       },
       // gas: 12000000,
       // blockGasLimit: 0x1fffffffffffff,

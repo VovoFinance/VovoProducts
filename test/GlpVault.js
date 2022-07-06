@@ -56,8 +56,7 @@ describe("GlpVault", function () {
             owner.address, // rewards
             "5", // leverage
             true, // isLong
-            "10000000000000000000000000", // cap: 10m glp
-            "1000000000000000000" // underlying base: 1e18
+            "10000000000000000000000000" // cap: 10m glp
         )
 
         glpVault2 = await glpVaultContract.connect(owner).deploy();
@@ -69,8 +68,7 @@ describe("GlpVault", function () {
             owner.address, // rewards
             "20", // leverage
             false, // isLong
-            "10000000000000000000000000", // cap: 10m glp
-            "1000000000000000000" // underlying base: 1e18
+            "10000000000000000000000000" // cap: 10m glp
         )
 
         await network.provider.request({
@@ -90,7 +88,7 @@ describe("GlpVault", function () {
         stakedGlpContract = new ethers.Contract(stakedGlp, stakedGlpABI, signer);
 
         // await glpVault.setGmxContracts("0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064", "0x489ee077994B6658eAfA855C308275EAd8097C4A");
-        await glpVault.connect(owner).setParameters(true, 5, "10000000000000000000000000",  "100000", "86400", true, true, rewards.address);
+        await glpVault.connect(owner).setParameters(true, false, 5, "10000000000000000000000000",  "200000", "86400", true, true, rewards.address);
 
         await network.provider.request({
             method: "hardhat_impersonateAccount",
@@ -149,12 +147,12 @@ describe("GlpVault", function () {
 
     it("poke", async() => {
         await expect(glpVault.connect(admin).poke()).to.be.revertedWith("!keepers");
-        await expect(glpVault.connect(owner).poke()).to.be.revertedWith("!poke time");
+        await expect(glpVault.connect(owner).poke()).to.be.revertedWith("!time");
 
         await usdcContract.connect(owner).approve(glpVault2.address, depositAmount.mul(2))
         await glpVault2.connect(owner).deposit(usdc, depositAmount.mul(2), 0)
 
-        // 1st poke after one day
+        // 1st poke after one week
         await provider.send("evm_increaseTime", [86400*8])
         await provider.send("evm_mine")
         console.log("share price1", (await glpVault.getPricePerShare(false)).toString());
@@ -165,7 +163,7 @@ describe("GlpVault", function () {
         // const tx1 = await glpVault2.connect(owner).poke();
         // expect(await tx1).to.emit(glpVault2, "OpenPosition");
 
-        // 2nd poke after another day
+        // 2nd poke after another week
         // await network.provider.send("evm_setNextBlockTimestamp", [1636124246])
         await provider.send("evm_increaseTime", [86400*16])
         await provider.send("evm_mine")
@@ -193,30 +191,30 @@ describe("GlpVault", function () {
         console.log("withdraw glp ", (beforeBalance.div(2)).toString())
         assertAlmostEqual(afterBalance, beforeBalance.div(2));
         // withdraw to vault
-        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!withdraw-to-vault"); // withdraw half
+        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!whitelist"); // withdraw half
         await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, true);
         await glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address);
         assertAlmostEqual(await glpVault.balanceOf(owner.address), beforeBalance.div(4));
         // expect(await glpVault2.balanceOf(owner.address)).to.be.greaterThan("0");
 
         await glpVault.connect(owner).setVault(glpVault.address, glpVault2.address, false);
-        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!withdraw-to-vault"); // withdraw half
+        await expect(glpVault.connect(owner).withdrawToVault(beforeBalance.div(4), glpVault2.address)).to.be.revertedWith("!whitelist"); // withdraw half
         // withdraw all
         // await ppv.connect(owner).withdrawAll();
         // expect((await ppv.balanceOf(owner.address)).toString()).to.be.equal(BigNumber.from(0));
     })
 
     it("set governance", async() => {
-        await expect(glpVault.connect(governor).setGovernance(governor.address)).to.be.revertedWith("!governor");
+        await expect(glpVault.connect(governor).setGovernance(governor.address)).to.be.revertedWith("!gov");
         await glpVault.connect(owner).setGovernance(governor.address);
         await glpVault.connect(governor).setLeverage("15");
         expect((await glpVault.leverage()).toString()).to.be.equal("15");
     })
 
     it("set admin and keeper", async() => {
-        await expect(glpVault.connect(admin).setAdmin(admin.address)).to.be.revertedWith("!authorized");
-        await expect(glpVault.connect(admin).setKeeper(keeper.address, true)).to.be.revertedWith("!admin");
-        await expect(glpVault.connect(admin).setKeeper(keeper.address, false)).to.be.revertedWith("!admin");
+        await expect(glpVault.connect(admin).setAdmin(admin.address)).to.be.reverted;
+        await expect(glpVault.connect(admin).setKeeper(keeper.address, true)).to.be.reverted;
+        await expect(glpVault.connect(admin).setKeeper(keeper.address, false)).to.be.reverted;
         await glpVault.connect(owner).setAdmin(admin.address);
         await glpVault.connect(admin).setKeeper(keeper.address, true);
         expect((await glpVault.keepers(keeper.address)).toString()).to.be.equal("true");
@@ -225,25 +223,25 @@ describe("GlpVault", function () {
     })
 
     it("set fees", async() => {
-        await expect(glpVault.connect(admin).setFees("3000", "100")).to.be.revertedWith("!governor");
+        await expect(glpVault.connect(admin).setFees("3000", "100")).to.be.revertedWith("!gov");
         await glpVault.connect(governor).setFees("3000", "100");
         expect((await glpVault.performanceFee()).toString()).to.be.equal("3000");
         expect((await glpVault.managementFee()).toString()).to.be.equal("100");
     })
 
     it("set isLong", async() => {
-        await expect(glpVault.connect(admin).setIsLong(false)).to.be.revertedWith("!governor");
+        await expect(glpVault.connect(admin).setIsLong(false)).to.be.revertedWith("!gov");
         await glpVault.connect(governor).setIsLong(false);
         expect((await glpVault.isLong()).toString()).to.be.equal("false");
     })
 
     it("set setParameters", async() => {
-        await expect(glpVault.connect(admin).setParameters(false, 5, "1000000000000",  "100000", "10000000", true, true, rewards.address)).to.be.revertedWith("!governor");
-        await glpVault.connect(governor).setParameters(false, 5, "1000000000000", "100000", "10000000", true, true, rewards.address);
+        await expect(glpVault.connect(admin).setParameters(false, false, 5, "1000000000000",  "200000", "86400", true, true, rewards.address)).to.be.revertedWith("!gov");
+        await glpVault.connect(governor).setParameters(false, false, 5, "1000000000000", "200000", "86400", true, true, rewards.address);
         expect((await glpVault.isDepositEnabled()).toString()).to.be.equal("false");
         expect((await glpVault.cap()).toString()).to.be.equal("1000000000000");
-        expect((await glpVault.pokeInterval()).toString()).to.be.equal("100000");
-        expect((await glpVault.withdrawInterval()).toString()).to.be.equal("10000000");
+        expect((await glpVault.pokeInterval()).toString()).to.be.equal("200000");
+        expect((await glpVault.withdrawInterval()).toString()).to.be.equal("86400");
         expect((await glpVault.isFreeWithdraw()).toString()).to.be.equal("true");
         expect((await glpVault.isKeeperOnly()).toString()).to.be.equal("true");
         expect((await glpVault.rewards()).toString()).to.be.equal(rewards.address);
