@@ -277,7 +277,8 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
    */
   function collectReward() private returns(uint256 tokenReward) {
     uint256 _before = IERC20Upgradeable(WETH).balanceOf(address(this));
-    IRewardRouter(REWARD_ROUTER).handleRewards(false, false, true, true, true, true, false);
+    IRewardRouter(REWARD_ROUTER).handleRewards({_shouldClaimGmx: false, _shouldStakeGmx: false, _shouldClaimEsGmx: true, _shouldStakeEsGmx: true,
+      _shouldStakeMultiplierPoints: true, _shouldClaimWeth: true, _shouldConvertWethToEth: false});
     uint256 _after = IERC20Upgradeable(WETH).balanceOf(address(this));
     tokenReward = _after.sub(_before);
   }
@@ -302,7 +303,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     uint256 _sizeDelta = leverage.mul(amount).muldiv(_wethPrice, BASE);
     IERC20Upgradeable(WETH).safeIncreaseAllowance(gmxRouter, amount);
     IRouter(gmxRouter).approvePlugin(gmxPositionManager);
-    IRouter(gmxPositionManager).increasePosition(_path, underlying, amount, 0, _sizeDelta, isLong, _underlyingPrice);
+    IRouter(gmxPositionManager).increasePosition({_path: _path, _indexToken: underlying, _amountIn: amount, _minOut: 0, _sizeDelta: _sizeDelta, _isLong: isLong, _price: _underlyingPrice});
     emit OpenPosition(underlying, _underlyingPrice, _wethPrice, _sizeDelta, isLong, amount);
   }
 
@@ -336,13 +337,15 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     uint256 _before = IERC20Upgradeable(WETH).balanceOf(address(this));
     IRouter(gmxRouter).approvePlugin(gmxPositionManager);
     if (WETH == collateral) {
-      IRouter(gmxPositionManager).decreasePosition(underlying, underlying, 0, size, isLong, address(this), _underlyingPrice);
+      IRouter(gmxPositionManager).decreasePosition({_collateralToken: underlying, _indexToken: underlying, _collateralDelta: 0,
+      _sizeDelta: size, _isLong: isLong, _receiver: address(this), _price: _underlyingPrice});
     } else {
       address[] memory path = new address[](2);
       path = new address[](2);
       path[0] = collateral;
       path[1] = WETH;
-      IRouter(gmxPositionManager).decreasePositionAndSwap(path, underlying, 0, size, isLong, address(this), _underlyingPrice, 0);
+      IRouter(gmxPositionManager).decreasePositionAndSwap({_path: path, _indexToken: underlying, _collateralDelta: 0,
+      _sizeDelta: size, _isLong: isLong, _receiver: address(this), _price: _underlyingPrice, _minOut: 0});
     }
     uint256 _after = IERC20Upgradeable(WETH).balanceOf(address(this));
     uint256 _tradeProfit = _after.sub(_before);
@@ -356,7 +359,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
 
   function mintAndStakeGlp(address tokenIn, uint256 tokenInAmount, uint256 minGlp) private returns(uint256 glpAmount) {
     IERC20Upgradeable(tokenIn).safeIncreaseAllowance(GLP_MANAGER, tokenInAmount);
-    glpAmount = IRewardRouter(REWARD_ROUTER).mintAndStakeGlp(tokenIn, tokenInAmount, 0, minGlp);
+    glpAmount = IRewardRouter(REWARD_ROUTER).mintAndStakeGlp({_token: tokenIn, _amount: tokenInAmount, _minUsdg: 0, _minGlp: minGlp});
   }
 
   /**
@@ -392,9 +395,9 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     _burn(msg.sender, shares);
 
     if (IERC20Upgradeable(tokenOut).isETH()) {
-      tokenOutAmount = IRewardRouter(REWARD_ROUTER).unstakeAndRedeemGlpETH(glpAmount, minOut, address(this));
+      tokenOutAmount = IRewardRouter(REWARD_ROUTER).unstakeAndRedeemGlpETH({_glpAmount: glpAmount, _minOut: minOut, _receiver: address(this)});
     } else {
-      tokenOutAmount = IRewardRouter(REWARD_ROUTER).unstakeAndRedeemGlp(tokenOut, glpAmount, minOut, address(this));
+      tokenOutAmount = IRewardRouter(REWARD_ROUTER).unstakeAndRedeemGlp({_tokenOut: tokenOut, _glpAmount: glpAmount, _minOut: minOut, _receiver: address(this)});
     }
     IERC20Upgradeable(tokenOut).uniTransfer(msg.sender, tokenOutAmount);
     emit Withdraw(msg.sender, shares, glpAmount, tokenOut, tokenOutAmount);
@@ -522,7 +525,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     bool _isFreeWithdraw,
     address _rewards
   ) external onlyGovernor {
-    require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50 && _minPokeInterval > _withdrawInterval.mul(2), "!allowed");
+    require(_maxCollateralMultiplier >= 1 && _maxCollateralMultiplier <= 50 && _pokeInterval > _withdrawInterval.mul(2), "!allowed");
     isDepositEnabled = _isDepositEnabled;
     disablePokeInterval = _disablePokeInterval;
     maxCollateralMultiplier = _maxCollateralMultiplier;
