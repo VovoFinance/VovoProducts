@@ -84,6 +84,11 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   /// mapping(fromVault => mapping(toVault => true/false))
   mapping(address => mapping(address => bool)) public withdrawMapping;
 
+  // added these two new addresses in the upgraded contract because of the GMX migration:
+  // https://medium.com/@gmx.io/gmx-deployment-updates-nov-2022-16572314874d
+  address public constant newGlpManager = address(0x3963FfC9dff443c2A94f21b129D429891E32ec18);
+  address public constant newRewardRouter = address(0xB95DB5B167D75e6d04227CfFFA61069348d271F5);
+
   event Deposited(address depositor, address account, uint256 shares, uint256 glpAmount, address tokenIn, uint256 tokenInAmount);
   event DepositedGlp(address depositor, address account, uint256 shares, uint256 glpAmount);
   event Poked(uint256 tokenReward, uint256 glpAmount, uint256 pricePerShare, uint256 fee);
@@ -186,7 +191,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
 
     uint256 glpAmount = 0;
     if (IERC20(tokenIn).isETH()) {
-      glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlpETH{value: msg.value}(0, minGlp);
+      glpAmount = IRewardRouter(newRewardRouter).mintAndStakeGlpETH{value: msg.value}(0, minGlp);
     } else {
       glpAmount = mintAndStakeGlp(tokenIn, tokenInAmount, minGlp);
     }
@@ -358,9 +363,9 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   }
 
   function mintAndStakeGlp(address tokenIn, uint256 tokenInAmount, uint256 minGlp) private returns(uint256 glpAmount) {
-    IERC20(tokenIn).safeApprove(glpManager, 0);
-    IERC20(tokenIn).safeApprove(glpManager, tokenInAmount);
-    glpAmount = IRewardRouter(rewardRouter).mintAndStakeGlp(tokenIn, tokenInAmount, 0, minGlp);
+    IERC20(tokenIn).safeApprove(newGlpManager, 0);
+    IERC20(tokenIn).safeApprove(newGlpManager, tokenInAmount);
+    glpAmount = IRewardRouter(newRewardRouter).mintAndStakeGlp(tokenIn, tokenInAmount, 0, minGlp);
   }
 
   /**
@@ -397,9 +402,9 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
     _burn(msg.sender, shares);
 
     if (IERC20(tokenOut).isETH()) {
-      tokenOutAmount = IRewardRouter(rewardRouter).unstakeAndRedeemGlpETH(glpAmount, minOut, address(this));
+      tokenOutAmount = IRewardRouter(newRewardRouter).unstakeAndRedeemGlpETH(glpAmount, minOut, address(this));
     } else {
-      tokenOutAmount = IRewardRouter(rewardRouter).unstakeAndRedeemGlp(tokenOut, glpAmount, minOut, address(this));
+      tokenOutAmount = IRewardRouter(newRewardRouter).unstakeAndRedeemGlp(tokenOut, glpAmount, minOut, address(this));
     }
     IERC20(tokenOut).uniTransfer(msg.sender, tokenOutAmount);
     emit Withdraw(msg.sender, shares, glpAmount, tokenOut, tokenOutAmount);
@@ -463,7 +468,7 @@ contract GlpVault is Initializable, ERC20Upgradeable, PausableUpgradeable, Reent
   }
 
   function getGlpPrice() public view returns (uint256) {
-    return IGlpManager(glpManager).getAum(true).mul(1e6).div(IERC20(glp).totalSupply());
+    return IGlpManager(newGlpManager).getAum(true).mul(1e6).div(IERC20(glp).totalSupply());
   }
 
   // ===== Permissioned Actions: Governance =====

@@ -18,8 +18,11 @@ module.exports = {
     hardhat: {
       forking: {
         url: `https://arbitrum-mainnet.infura.io/v3/${infuraArbApiKey}`,
-        blockNumber: 8671892
-      },
+        blockNumber: 44750740,
+        // gas: 2100000,
+        // gasPrice: 8000000000,
+        // allowUnlimitedContractSize: true
+      }
       // gas: 12000000,
       // blockGasLimit: 0x1fffffffffffff,
       // allowUnlimitedContractSize: true,

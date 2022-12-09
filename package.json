@@ -23,7 +23,7 @@
     "chai": "^4.3.4",
     "ethereum-waffle": "^3.4.0",
     "ethers": "^5.4.4",
-    "hardhat": "^2.6.7"
+    "hardhat": "^2.13.0-dev.1"
   },
   "dependencies": {
     "@nomiclabs/hardhat-etherscan": "^2.1.6",
@@ -32,6 +32,7 @@
     "@openzeppelin/contracts-upgradeable": "^3.1.0",
     "@openzeppelin/hardhat-upgrades": "^1.10.0",
     "@types/jest": "^27.0.2",
-    "@types/mocha": "^9.0.0"
+    "@types/mocha": "^9.0.0",
+    "@uniswap/v3-periphery": "^1.4.3"
   }
 }
