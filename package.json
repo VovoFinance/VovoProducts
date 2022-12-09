@@ -32,6 +32,8 @@
     "@openzeppelin/contracts-upgradeable": "^3.1.0",
     "@openzeppelin/hardhat-upgrades": "^1.10.0",
     "@types/jest": "^27.0.2",
-    "@types/mocha": "^9.0.0"
+    "@types/mocha": "^9.0.0",
+    "@uniswap/v3-periphery": "^1.4.0",
+    "hardhat-contract-sizer": "^2.5.1"
   }
 }
